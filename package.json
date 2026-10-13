@@ -1,0 +1,14 @@
+{
+  "name": "commission-clock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Commission Clock: a commission escrow with a chess clock. After every message the validators decide whose move it is now, the clock runs only against that side, and the late cut comes out of the fee by the seconds each side actually owed.",
+  "type": "module",
+  "scripts": {
+    "smoke": "node tests/on_chain/smoke.mjs"
+  },
+  "dependencies": {
+    "genlayer-js": "1.1.8",
+    "viem": "2.56.8"
+  }
+}

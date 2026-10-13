@@ -1,0 +1,465 @@
+@import "tailwindcss";
+
+/* Commission Clock looks like a tournament chess clock on a games table: a cream tabletop with a very
+   faint checkerboard worked into one corner, a walnut two-faced clock whose lit face glows amber for
+   the side that holds the move, a small red flag that drops when a side runs over, round clock
+   plungers for the one action that hands the move over, squared brass plates for everything else,
+   and every judged message stamped like an arbiter's card. Motion: the lit face's slow glow, a
+   plunger going down, a flag dropping and the second hand of a waiting panel; all of it is skipped
+   for anyone who asks for reduced motion. */
+
+@theme {
+  --color-table: #f3ebdc;
+  --color-table-2: #ebe0cb;
+  --color-card: #fcf8ef;
+  --color-line: #e2d6bf;
+  --color-line-strong: #c8b593;
+  --color-ink: #2a1d15;
+  --color-ink-2: #574638;
+  --color-ink-3: #85715f;
+  --color-walnut: #5b3a29;
+  --color-walnut-deep: #3e2619;
+  --color-walnut-light: #8a5f45;
+  --color-amber: #f2a93b;
+  --color-amber-glow: #ffcf73;
+  --color-amber-wash: #fbeacb;
+  --color-amber-ink: #8a5300;
+  --color-face-dim: #e6dbc4;
+  --color-digit-dim: #a5927b;
+  --color-flag: #d7263d;
+  --color-flag-ink: #a11b2d;
+  --color-flag-wash: #fbe2e4;
+  --color-felt: #2f6b4f;
+  --color-felt-ink: #245640;
+  --color-felt-wash: #e1efe6;
+  --color-brass: #c39a45;
+  --color-brass-light: #e7cf8c;
+  --color-brass-deep: #8a6a24;
+  --color-focus: #1f5fd6;
+
+  --font-sans: var(--font-instrument), "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-sharetech), ui-monospace, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-table);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    overflow-x: hidden;
+  }
+
+  /* The faint checkerboard worked into the table's top right corner, fading out toward the middle. */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(560px, 70vw);
+    height: 560px;
+    pointer-events: none;
+    z-index: -1;
+    background-image: conic-gradient(rgba(91, 58, 41, 0.07) 0 25%, transparent 0 50%, rgba(91, 58, 41, 0.07) 0 75%, transparent 0);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(circle at 100% 0%, #000 0%, rgba(0, 0, 0, 0.55) 35%, transparent 70%);
+    mask-image: radial-gradient(circle at 100% 0%, #000 0%, rgba(0, 0, 0, 0.55) 35%, transparent 70%);
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--color-ink);
+  }
+
+  a {
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  ::selection {
+    background: var(--color-amber-glow);
+  }
+}
+
+@layer components {
+  .mono {
+    font-family: var(--font-mono);
+    letter-spacing: 0.02em;
+  }
+
+  .display {
+    font-family: var(--font-display);
+  }
+
+  .kicker {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .link {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  }
+  .link:hover {
+    text-decoration-color: currentColor;
+  }
+
+  /* A card on the table: soft paper with a hairline and a low shadow, as if laid flat. */
+  .sheet {
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: 14px;
+    box-shadow: 0 1px 0 rgba(62, 38, 25, 0.04), 0 8px 24px -16px rgba(62, 38, 25, 0.35);
+  }
+
+  .field {
+    width: 100%;
+    border: 1.5px solid var(--color-line-strong);
+    background: #fffdf8;
+    border-radius: 10px;
+    padding: 0.55rem 0.75rem;
+    color: var(--color-ink);
+  }
+  .field:focus {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 1px;
+    border-color: var(--color-walnut);
+  }
+
+  .field-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-ink-2);
+  }
+
+  /* One-click suggestions: small rounded counters, like the pieces lifted off the board. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 32px;
+    border-radius: 999px;
+    border: 1.5px solid var(--color-line-strong);
+    background: #fffaf0;
+    padding: 0.15rem 0.75rem;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-ink-2);
+    text-align: left;
+  }
+  .chip:hover {
+    border-color: var(--color-walnut-light);
+    color: var(--color-ink);
+  }
+  .chip[aria-pressed="true"] {
+    border-color: var(--color-walnut);
+    background: var(--color-amber-wash);
+    color: var(--color-ink);
+  }
+
+  /* ---- the round clock plunger: a raised cap on a short stem, pressed down on click ---- */
+  .plunger {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    color: var(--color-ink);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .plunger-cap {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 54px;
+    height: 54px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 35% 30%, #d9a072 0%, var(--color-walnut-light) 28%, var(--color-walnut) 62%, var(--color-walnut-deep) 100%);
+    box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.25), inset 0 2px 1px rgba(255, 255, 255, 0.25), 0 3px 0 -1px var(--color-walnut-deep);
+    color: var(--color-amber-glow);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .plunger-stem {
+    width: 14px;
+    height: 15px;
+    margin-top: 1px;
+    background: linear-gradient(90deg, #9d9588, #f6f2ea 45%, #7d7569);
+    box-shadow: inset 0 3px 3px -2px rgba(0, 0, 0, 0.35);
+    border-radius: 0 0 3px 3px;
+    transition: height 120ms ease;
+  }
+  .plunger-base {
+    width: 64px;
+    height: 7px;
+    border-radius: 6px 6px 2px 2px;
+    background: var(--color-walnut-deep);
+  }
+  .plunger-label {
+    margin-top: 0.55rem;
+    max-width: 18rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1.2;
+    text-align: center;
+  }
+  .plunger:hover .plunger-cap {
+    filter: brightness(1.06);
+  }
+  .plunger:active:not(:disabled) .plunger-cap,
+  .plunger[data-pressed="true"] .plunger-cap {
+    transform: translateY(12px);
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.25), inset 0 2px 1px rgba(255, 255, 255, 0.2), 0 1px 0 0 var(--color-walnut-deep);
+  }
+  .plunger:active:not(:disabled) .plunger-stem,
+  .plunger[data-pressed="true"] .plunger-stem {
+    height: 3px;
+    margin-bottom: 12px;
+  }
+  .plunger:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .plunger:focus-visible {
+    outline: none;
+  }
+  .plunger:focus-visible .plunger-cap {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 3px;
+  }
+  .plunger-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0.9rem;
+    text-align: left;
+  }
+  .plunger-row .plunger-label {
+    margin: 0 0 0.6rem;
+    text-align: left;
+  }
+
+  /* ---- the squared brass plate: secondary actions, with four screws ---- */
+  .brass {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 40px;
+    padding: 0.45rem 1.05rem;
+    border-radius: 4px;
+    border: 1px solid var(--color-brass-deep);
+    background:
+      radial-gradient(circle at 6px 6px, var(--color-brass-deep) 1.3px, transparent 1.6px),
+      radial-gradient(circle at calc(100% - 6px) 6px, var(--color-brass-deep) 1.3px, transparent 1.6px),
+      radial-gradient(circle at 6px calc(100% - 6px), var(--color-brass-deep) 1.3px, transparent 1.6px),
+      radial-gradient(circle at calc(100% - 6px) calc(100% - 6px), var(--color-brass-deep) 1.3px, transparent 1.6px),
+      linear-gradient(180deg, var(--color-brass-light) 0%, var(--color-brass) 55%, #b08533 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 2px 0 var(--color-brass-deep);
+    color: var(--color-walnut-deep);
+    font-weight: 700;
+    font-size: 14.5px;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: transform 100ms ease, box-shadow 100ms ease;
+  }
+  .brass:hover {
+    filter: brightness(1.04);
+  }
+  .brass:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 0 var(--color-brass-deep);
+  }
+  .brass:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .brass-sm {
+    min-height: 32px;
+    padding: 0.25rem 0.75rem;
+    font-size: 13px;
+  }
+  .brass-plain {
+    border-color: var(--color-line-strong);
+    background: #fffaf0;
+    box-shadow: 0 2px 0 var(--color-line-strong);
+    color: var(--color-ink-2);
+  }
+  .brass-danger {
+    border-color: var(--color-flag-ink);
+    background:
+      radial-gradient(circle at 6px 6px, var(--color-flag-ink) 1.3px, transparent 1.6px),
+      radial-gradient(circle at calc(100% - 6px) 6px, var(--color-flag-ink) 1.3px, transparent 1.6px),
+      radial-gradient(circle at 6px calc(100% - 6px), var(--color-flag-ink) 1.3px, transparent 1.6px),
+      radial-gradient(circle at calc(100% - 6px) calc(100% - 6px), var(--color-flag-ink) 1.3px, transparent 1.6px),
+      linear-gradient(180deg, #f6c9cf, #eaa0aa);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 2px 0 var(--color-flag-ink);
+    color: var(--color-flag-ink);
+  }
+
+  /* ---- the chess clock ---- */
+  .clock-case {
+    position: relative;
+    container-type: inline-size;
+    border-radius: 28px 28px 14px 14px;
+    background: linear-gradient(180deg, #6d4630 0%, var(--color-walnut) 40%, #4c2f21 100%);
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.12), inset 0 -6px 0 rgba(0, 0, 0, 0.22), 0 18px 30px -18px rgba(62, 38, 25, 0.75);
+  }
+  .clock-case::after {
+    /* the grain: a few long, faint stripes */
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.025) 0 3px, transparent 3px 17px, rgba(0, 0, 0, 0.04) 17px 19px, transparent 19px 41px);
+  }
+  .clock-face {
+    position: relative;
+    border-radius: 12px;
+    background: var(--color-face-dim);
+    box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.28);
+    color: var(--color-digit-dim);
+    transition: background-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
+  }
+  .clock-face[data-lit="true"] {
+    background: radial-gradient(ellipse at 50% 35%, var(--color-amber-glow) 0%, var(--color-amber) 70%, #df8f1d 100%);
+    color: var(--color-walnut-deep);
+    box-shadow: inset 0 3px 8px rgba(120, 60, 0, 0.35), 0 0 22px 2px rgba(242, 169, 59, 0.45);
+    animation: face-glow 3.2s ease-in-out infinite;
+  }
+  .clock-face[data-over="true"][data-lit="true"] {
+    background: radial-gradient(ellipse at 50% 35%, #ffd3a0 0%, #f39a5a 75%, #e2733d 100%);
+  }
+  .clock-digits {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    line-height: 1;
+  }
+  .clock-plunger {
+    position: absolute;
+    top: -14px;
+    width: 30%;
+    height: 18px;
+    border-radius: 9px 9px 3px 3px;
+    background: linear-gradient(180deg, #4a2d20, var(--color-walnut-deep));
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.15);
+    transition: transform 160ms ease, height 160ms ease, top 160ms ease;
+  }
+  .clock-plunger[data-down="true"] {
+    top: -6px;
+    height: 10px;
+  }
+  .flag {
+    transform-origin: 2px 2px;
+    transition: transform 500ms cubic-bezier(0.5, 1.6, 0.4, 1);
+  }
+  .flag[data-fallen="true"] {
+    transform: rotate(118deg);
+  }
+
+  /* ---- the arbiter's stamp on a judged message ---- */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 2px solid currentColor;
+    border-radius: 6px;
+    padding: 0.12rem 0.55rem;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transform: rotate(-1.6deg);
+    background: color-mix(in srgb, currentColor 7%, transparent);
+  }
+
+  /* ---- the waiting panel: a tournament score sheet, ruled ---- */
+  .scoresheet {
+    background-color: #fffdf6;
+    background-image: repeating-linear-gradient(180deg, transparent 0 31px, rgba(91, 58, 41, 0.09) 31px 32px);
+  }
+  .second-hand {
+    transform-origin: 50% 50%;
+    animation: tick 60s steps(60) infinite;
+  }
+}
+
+@keyframes face-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.07);
+  }
+}
+
+@keyframes tick {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes stamp-in {
+  from {
+    transform: rotate(-8deg) scale(1.5);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(-1.6deg) scale(1);
+    opacity: 1;
+  }
+}
+.stamp-new {
+  animation: stamp-in 320ms cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
