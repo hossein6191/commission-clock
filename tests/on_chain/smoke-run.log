@@ -1,0 +1,109 @@
+[keeper] starting 2026-10-13T11:35:09.782Z
+[11:35:15] MAKER    0xc561af5c84907042E1788CF0936c632775aCbe78
+           CLIENT   0xd744C973724B20dAf1DB031C3105a490BDFFF800
+           STRANGER 0x3E51bd75A2345C62E9405e63f38E2463bF3A3Df7
+           drafts https://raw.githubusercontent.com/hossein6191/commission-clock/cc909440cc83c345ec931b82b514b7018639f8f6/drafts/
+
+[11:35:15] ---- phase A: deploy, the studio, three commissions, two clocks started
+      [11:35:56] MAKER deploy commission_clock.py  0x45faf27bbc4f7d9ceb088166e8639c99305c54763de1287cc089cb665255d85e  4 agree, 0 disagree, 1 idle  SUCCESS  0xA1D5A82406a34ee95bc07e4258116dCbE40a9385
+      Commission Clock at 0xA1D5A82406a34ee95bc07e4258116dCbE40a9385
+      [11:36:36] MAKER open_studio(Fernhill Pottery, re and the words that sell it., 1000000000000000000, 900, 420, 60, 1000, 5000)  0x9d5337bda4b3780af7e9fe80d297351189a9b38f176cc0bd4409b2a534b68eca  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  MAKER opens S1, Fernhill Pottery: 1 GEN, 900 s for the maker, 420 s for the client, 10% per started minute late up to 50%  - 5 agree, 0 disagree, 0 idle  {"ok": true, "studio": "S1", "maker": "0xc561af5c84907042e1788cf0936c632775acbe78", "name": "Fernhill Pottery", "fee": "
+      [11:37:16] STRANGER close_studio(S1)  0xaa66c4e8d9639fd71e204a5d6ff7b782a54dac6acf3848dcd7a901824b89ce83  5 agree, 0 disagree, 0 idle  ERROR
+PASS  STRANGER may not close S1  - 5 agree, 0 disagree, 0 idle  [EXPECTED] only the maker of S1 may close it
+      [11:37:56] CLIENT request_commission(S1, on that it is dishwasher safe.) +1 GEN  0x623b41f2c4a00fda3f2c053381a65a8b1600129be1027322a7e8b7d888900d12  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  CLIENT commissions S1 with the mug brief: C1, 1 GEN held, no clock yet  - 3 agree, 0 disagree, 2 idle  {"ok": true, "commission": "C1", "studio": "S1", "client": "0xd744c973724b20daf1db031c3105a490bdfff8
+      [11:38:37] CLIENT request_commission(S1, on that it is dishwasher safe.) +1 GEN  0x4cddfdcf412d660098713352649afd3e007f453799ffcf9812806f60b73d8f29  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  CLIENT commissions S1 with the mug brief: C2, 1 GEN held, no clock yet  - 3 agree, 0 disagree, 2 idle  {"ok": true, "commission": "C2", "studio": "S1", "client": "0xd744c973724b20daf1db031c3105a490bdfff8
+      [11:39:18] CLIENT request_commission(S1, on that it is dishwasher safe.) +1 GEN  0x9d1fe10cca11046b8945b61e93f0912446414e1f0ea65b505728f0cbb14f4ea1  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  CLIENT commissions S1 with the mug brief: C3, 1 GEN held, no clock yet  - 3 agree, 0 disagree, 2 idle  {"ok": true, "commission": "C3", "studio": "S1", "client": "0xd744c973724b20daf1db031c3105a490bdfff8
+      [11:39:58] MAKER request_commission(S1, on that it is dishwasher safe.) +1 GEN  0xbcf0a4b0c16140f95e178ef02bc0767d86f8af0112b87621d71a41d70af6f11a  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  MAKER may not commission its own studio, and the 1 GEN comes back in the same transaction  - 5 agree, 0 disagree, 0 idle  the maker of S1 may not commission its own studio
+      [11:40:43] STRANGER accept(C1)  0xbd05cda7184e321ea3498cae5b70a20d8ed61ead46bb47d2ff6cc95e344eefcd  5 agree, 0 disagree, 0 idle  ERROR
+PASS  STRANGER may not accept C1  - 5 agree, 0 disagree, 0 idle  [EXPECTED] only the maker of C1 may accept it
+      [11:41:18] MAKER accept(C3)  0x003b91cd9fdb59b3d5bd17963e7b5e7201f69ef115ab0e61fe04ce9ec173f3f0  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  MAKER accepts C3: the clock starts with the move on the maker  - 5 agree, 0 disagree, 0 idle  {"ok": true, "commission": "C3", "status": "active", "holder": "maker", "since": 1791891645}
+      [11:41:58] CLIENT cancel_late(C3)  0x8c3186889a96a9fec8dde656044a317f41002f6d0dfbb98b3e948e0ef854a0b6  5 agree, 0 disagree, 0 idle  ERROR
+PASS  CLIENT may not cancel C3 yet: the maker's cut is far from its cap  - 5 agree, 0 disagree, 0 idle  [EXPECTED] the maker's cut on C3 is 0 of its 5000 basis point cap; it can be cancelled once the cut is at the cap and the maker's current tu
+      [11:42:33] MAKER accept(C2)  0xf2ef89dd0106a5dc5213b12ec113c72e69afdb4f9a412e5867c6987d6b630fab  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  MAKER accepts C2  - 5 agree, 0 disagree, 0 idle
+      [11:43:22] MAKER deliver(C2, 8639f8f6/drafts/mug-final.html, The finished description.)  0xaabdbb08c5f9c24c63b5cbd034f9d1fc09535aefba0967f81005979a32338155  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  every validator fetches mug-final.html for C2 and agrees it is the finished piece: delivered, the move to CLIENT  - 3 agree, 0 disagree, 2 idle  {"verdict":"delivered","fp":"b9d43c8d6508c6f2"}
+      .. the stored fingerprint b9d43c8d6508c6f2; this checkout's file gives b9d43c8d6508c6f2
+      [11:44:02] MAKER claim_silence(C2)  0xd2d9cf90bdf29a008662fc569bd3c381b5967588ac6e1a5a59ce3e5747f3aee1  5 agree, 0 disagree, 0 idle  ERROR
+PASS  MAKER may not claim silence on C2 yet: the client has not used its 420 seconds  - 5 agree, 0 disagree, 0 idle  [EXPECTED] the client has used 0 of its 420 seconds on C2; silence can be claimed once it is past them and its current turn has been charged
+
+[11:44:03] ---- phase B: the conversation on C1, every press judged by the validators
+      [11:44:42] MAKER accept(C1)  0x568bd9dfbac12cd861b3bbb59b50e93360e9f9d600b8bdccea9891716d6e436e  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER accepts C1  - 3 agree, 0 disagree, 2 idle
+      [11:45:22] CLIENT say(C1, ug goes in our autumn listing.)  0x633d062ec50b99d5e1c7427a504a15ba04d66c42420216007b7df4dd3073c659  4 agree, 0 disagree, 1 idle  SUCCESS
+PASS  CLIENT writes while MAKER holds the move: noted, nobody asked, the clock unchanged  - 4 agree, 0 disagree, 1 idle  {"ok": true, "commission": "C1", "message": "C1#1", "role": "client", "verdict": "noted", "holder": 
+      [11:47:08] MAKER say(C1, u to choose before I write it.)  0x05e491f4996ed4627af1afa1d3c03921f8b3a3c598ff1726d474203a317ae2f7  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER asks which glaze to name, which the brief leaves open: pass, the move goes to CLIENT  - 3 agree, 0 disagree, 2 idle  -> {"verdict":"pass","holder":"client","maker_used":80,"client_used":0}
+      [11:48:16] CLIENT say(C1, I'll get back to you on that.)  0x2be8b3063d81256fe6db70152a00c865ad1bcafd50570b083d235b7f60e29dbe  3 agree, 1 disagree, 1 idle  SUCCESS
+PASS  CLIENT: "I'll get back to you on that.": keep, the move stays with CLIENT  - 3 agree, 1 disagree, 1 idle  -> {"verdict":"keep","holder":"client","maker_used":80,"client_used":0}
+      [11:50:02] CLIENT say(C1, Sea-green, please.)  0xb4006d3ce9682694d0ad49c3baee9e5e2f315e457c9a6e7684071c49e3f892f3  3 agree, 1 disagree, 1 idle  SUCCESS
+PASS  CLIENT: "Sea-green, please.": pass, the move goes back to MAKER  - 3 agree, 1 disagree, 1 idle  -> {"verdict":"pass","holder":"maker","maker_used":80,"client_used":0}
+      [11:51:02] MAKER say(C1, ription be written in English?)  0x1da809004f50b7f42b5525fb5fadaa8b4d33367de40c3dba207a721844ada424  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER asks whether to write in English, which the brief already says: keep  - 3 agree, 0 disagree, 2 idle  -> {"verdict":"keep","holder":"maker","maker_used":80,"client_used":0}
+      [11:52:00] MAKER say(C1, Working on it, nearly there.)  0xcdbaca3174f0a690dcf0959bf1d538e3cf1e189b2a75d466717d8608efb68d31  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER: "Working on it, nearly there.": keep, a progress update hands nothing over  - 3 agree, 0 disagree, 2 idle  -> {"verdict":"keep","holder":"maker","maker_used":80,"client_used":0}
+      [11:53:16] MAKER deliver(C1, f6/drafts/mug-placeholder.html, First draft.)  0x653de5a4fbd41cb72c3cf380a062dad2a66462de45f6fc407b3632ab7a4219bd  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER delivers mug-placeholder.html ("Draft coming soon."): missing, the move stays with MAKER  - 3 agree, 0 disagree, 2 idle  {"verdict":"missing","fp":"73903527c1f6a2b7"}
+      [11:55:14] MAKER deliver(C1, 8639f8f6/drafts/mug-final.html, The finished description.)  0x5f952e14948b39ec9f67d29531194993c8a38fb3a57c12bf3d23923f6e050b8b  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  MAKER delivers mug-final.html: delivered, the move goes to CLIENT for its review  - 3 agree, 0 disagree, 2 idle  {"verdict":"delivered","maker_used":80,"client_used":0}
+      [11:55:51] CLIENT accept_work(C1)  0x42f1d5d17c8df757d6578f0f7728e07a3ceeac775df7df8b4d06c030d8846845  3 agree, 0 disagree, 2 idle  SUCCESS
+PASS  CLIENT accepts the work: the split follows the maker's stored 80 seconds exactly  - 3 agree, 0 disagree, 2 idle  {"maker_used":80,"maker_late":0,"cut_bps":0,"to_maker":"1000000000000000000","to_client":"0"}
+PASS  in the same transaction MAKER receives the fee less the cut and CLIENT the cut  - {"maker":"1000000000000000000","client":"0"}
+
+[11:55:52] ---- phase C: the clocks run out
+PASS  the delivery handed C2 to CLIENT, so the first 300s of its review were not charged  - {"since":1791891755,"now":1791892552,"grace":300,"client_live":497}
+      [11:56:33] MAKER claim_silence(C2)  0x8b229c3a0d89a13d306731748249f5e17f6a02583c424d8b2c0ac633058672f2  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  CLIENT sat on C2 past its 420 seconds: MAKER claims silence and it settles as accepted  - 5 agree, 0 disagree, 0 idle  {"client_used":500,"maker_used":35,"to_maker":"1000000000000000000"}
+      [12:01:02] CLIENT cancel_late(C3)  0x7574d2ccd9f6c93c2f52989793e14c25cb41b2d7ea4e2caf1c3ef01592b2db19  5 agree, 0 disagree, 0 idle  SUCCESS
+PASS  MAKER sat on C3 until its cut reached the cap: CLIENT cancels and the whole 1 GEN comes back  - 5 agree, 0 disagree, 0 idle  {"maker_used":1178,"cut_bps":5000}
+      [12:01:40] CLIENT cancel_late(C3)  0xb686dce0ff0dd33f7ab56d24d2ad6cc73bba169876567813696ecccf9420a727  3 agree, 0 disagree, 2 idle  ERROR
+PASS  a second cancel of C3 is refused  - 3 agree, 0 disagree, 2 idle  [EXPECTED] C3 is cancelled_late; a commission is cancelled while it is active
+
+[12:01:40] ---- phase D: the code read back, the views, the balances
+PASS  the code deployed at 0xA1D5A82406a34ee95bc07e4258116dCbE40a9385 is byte for byte contracts/commission_clock.py  - 84423 bytes, sha256 d2d5d22533c2b0975aa6a214eae4aa461d3b1249efc6b8455fe713e4616085b0
+PASS  messages_of(C1) shows the whole thread with what each message came to  - ["noted","pass","keep","pass","keep","keep","missing","delivered"]
+PASS  commission(C1) reads accepted, the clock stopped and the payout stored  - {"status":"accepted","maker_used":80,"client_used":0}
+PASS  studio(S1) carries its public record: 3 commissions, 2 finished, 1 cancelled late, 5 presses, 3 deliveries  - {"commissions":3,"on_time":2,"late":0,"cancelled_late":1,"lapsed":0,"declined":0,"withdrawn":0,"presses":5,"passed":2,"kept":3,"unclear":0,"deliveries":3,"delivered":2,"missing":1,"late_seconds":278}
+PASS  commissions_of(CLIENT) lists the three commissions as client, and finds the address in any letter case  - {"total":3}
+PASS  stats(): nothing held, one noted message, one refused payment returned  - {"studios":1,"commissions":3,"waiting":0,"active":0,"accepted":1,"accepted_by_silence":1,"lapsed":0,"cancelled_late":1,"withdrawn":0,"declined":0,"presses":5,"passed":2,"kept":3,"unclear":0,"noted":1,"takes":0,"deliveries":3,"delivered":2,"missing":1,"delivery_unclear":0,"held":"0","taken":"3000000000000000000","to_makers":"2000000000000000000","to_clients":"1000000000000000000","refused_payments":1,"returned":"1000000000000000000"}
+PASS  rules() publishes the questions word for word, the comparison and the combine table
+PASS  the contract's own balance is zero  - 0
+PASS  every account ends where the money says: MAKER up 2 GEN, CLIENT down the same, STRANGER whole  - MAKER 2  CLIENT -2  STRANGER 0
+
+36 passed, 0 failed
+Commission Clock: 0xA1D5A82406a34ee95bc07e4258116dCbE40a9385  https://explorer-studio.genlayer.com/address/0xA1D5A82406a34ee95bc07e4258116dCbE40a9385
+transactions: 26 in 26 steps; sent a second time: none
+deploy              0x45faf27bbc4f7d9ceb088166e8639c99305c54763de1287cc089cb665255d85e 4 agree, 0 disagree, 1 idle SUCCESS
+openStudio          0x9d5337bda4b3780af7e9fe80d297351189a9b38f176cc0bd4409b2a534b68eca 5 agree, 0 disagree, 0 idle SUCCESS
+closeStranger       0xaa66c4e8d9639fd71e204a5d6ff7b782a54dac6acf3848dcd7a901824b89ce83 5 agree, 0 disagree, 0 idle ERROR
+request_c1          0x623b41f2c4a00fda3f2c053381a65a8b1600129be1027322a7e8b7d888900d12 3 agree, 0 disagree, 2 idle SUCCESS
+request_c2          0x4cddfdcf412d660098713352649afd3e007f453799ffcf9812806f60b73d8f29 3 agree, 0 disagree, 2 idle SUCCESS
+request_c3          0x9d1fe10cca11046b8945b61e93f0912446414e1f0ea65b505728f0cbb14f4ea1 3 agree, 0 disagree, 2 idle SUCCESS
+requestOwn          0xbcf0a4b0c16140f95e178ef02bc0767d86f8af0112b87621d71a41d70af6f11a 5 agree, 0 disagree, 0 idle SUCCESS
+acceptStranger      0xbd05cda7184e321ea3498cae5b70a20d8ed61ead46bb47d2ff6cc95e344eefcd 5 agree, 0 disagree, 0 idle ERROR
+accept_c3           0x003b91cd9fdb59b3d5bd17963e7b5e7201f69ef115ab0e61fe04ce9ec173f3f0 5 agree, 0 disagree, 0 idle SUCCESS
+cancelEarly         0x8c3186889a96a9fec8dde656044a317f41002f6d0dfbb98b3e948e0ef854a0b6 5 agree, 0 disagree, 0 idle ERROR
+accept_c2           0xf2ef89dd0106a5dc5213b12ec113c72e69afdb4f9a412e5867c6987d6b630fab 5 agree, 0 disagree, 0 idle SUCCESS
+deliver_c2          0xaabdbb08c5f9c24c63b5cbd034f9d1fc09535aefba0967f81005979a32338155 3 agree, 0 disagree, 2 idle SUCCESS
+silenceEarly        0xd2d9cf90bdf29a008662fc569bd3c381b5967588ac6e1a5a59ce3e5747f3aee1 5 agree, 0 disagree, 0 idle ERROR
+accept_c1           0x568bd9dfbac12cd861b3bbb59b50e93360e9f9d600b8bdccea9891716d6e436e 3 agree, 0 disagree, 2 idle SUCCESS
+sayThanks           0x633d062ec50b99d5e1c7427a504a15ba04d66c42420216007b7df4dd3073c659 4 agree, 0 disagree, 1 idle SUCCESS
+sayGlaze            0x05e491f4996ed4627af1afa1d3c03921f8b3a3c598ff1726d474203a317ae2f7 3 agree, 0 disagree, 2 idle SUCCESS
+sayLater            0x2be8b3063d81256fe6db70152a00c865ad1bcafd50570b083d235b7f60e29dbe 3 agree, 1 disagree, 1 idle SUCCESS
+saySeaGreen         0xb4006d3ce9682694d0ad49c3baee9e5e2f315e457c9a6e7684071c49e3f892f3 3 agree, 1 disagree, 1 idle SUCCESS
+sayEnglish          0x1da809004f50b7f42b5525fb5fadaa8b4d33367de40c3dba207a721844ada424 3 agree, 0 disagree, 2 idle SUCCESS
+sayUpdate           0xcdbaca3174f0a690dcf0959bf1d538e3cf1e189b2a75d466717d8608efb68d31 3 agree, 0 disagree, 2 idle SUCCESS
+deliverPlaceholder  0x653de5a4fbd41cb72c3cf380a062dad2a66462de45f6fc407b3632ab7a4219bd 3 agree, 0 disagree, 2 idle SUCCESS
+deliverFinal        0x5f952e14948b39ec9f67d29531194993c8a38fb3a57c12bf3d23923f6e050b8b 3 agree, 0 disagree, 2 idle SUCCESS
+acceptWork          0x42f1d5d17c8df757d6578f0f7728e07a3ceeac775df7df8b4d06c030d8846845 3 agree, 0 disagree, 2 idle SUCCESS
+claimSilence        0x8b229c3a0d89a13d306731748249f5e17f6a02583c424d8b2c0ac633058672f2 5 agree, 0 disagree, 0 idle SUCCESS
+cancelLate          0x7574d2ccd9f6c93c2f52989793e14c25cb41b2d7ea4e2caf1c3ef01592b2db19 5 agree, 0 disagree, 0 idle SUCCESS
+cancelAgain         0xb686dce0ff0dd33f7ab56d24d2ad6cc73bba169876567813696ecccf9420a727 3 agree, 0 disagree, 2 idle ERROR
+
+exit 0

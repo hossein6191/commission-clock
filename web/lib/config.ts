@@ -4,14 +4,14 @@
 // DEMO_CONTRACT is the deployed copy the site reads when NEXT_PUBLIC_CONTRACT is unset. It is filled
 // in once the contract is deployed; while both are empty every page says the contract is not
 // deployed yet, and the whole site still works with NEXT_PUBLIC_MOCK=1.
-export const DEMO_CONTRACT: string = "";
+export const DEMO_CONTRACT: string = "0xA1D5A82406a34ee95bc07e4258116dCbE40a9385";
 
 /**
  * The commit of the public repository whose drafts/ the demo maker delivers, as raw.githubusercontent.com
  * serves them: every validator fetches the same bytes. Filled in once the repository is pushed;
  * NEXT_PUBLIC_DRAFTS_COMMIT overrides it. While both are empty the demo maker can talk but not deliver.
  */
-export const DRAFTS_COMMIT: string = "";
+export const DRAFTS_COMMIT: string = "cc909440cc83c345ec931b82b514b7018639f8f6";
 
 export const SITE_NAME = "Commission Clock";
 export const SITE_TAGLINE = "The clock runs only against the side that holds the move.";

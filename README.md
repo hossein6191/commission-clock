@@ -492,7 +492,51 @@ line.
 
 ## Evidence
 
-The on-chain run is recorded here once it has run.
+Run on 13 October 2026 on GenLayer Studio (chain 61999) by `tests/on_chain/smoke.mjs`, from three generated accounts,
+one per role: **MAKER**, **CLIENT** and **STRANGER**. The deliveries were the files in `drafts/` read from
+`raw.githubusercontent.com` pinned to commit `cc909440cc83c345ec931b82b514b7018639f8f6`. **36 checks passed, 0 failed**;
+the whole log is `tests/on_chain/smoke-run.log`. 26 transactions in 26 steps, none sent twice.
+
+Register [`0xA1D5A82406a34ee95bc07e4258116dCbE40a9385`](https://explorer-studio.genlayer.com/address/0xA1D5A82406a34ee95bc07e4258116dCbE40a9385).
+`gen_getContractCode` on it returns `contracts/commission_clock.py` byte for byte (84,423 bytes, sha256
+`d2d5d22533c2b0975aa6a214eae4aa461d3b1249efc6b8455fe713e4616085b0`).
+
+| call | by | transaction | result |
+|---|---|---|---|
+| deploy `contracts/commission_clock.py` | MAKER | [0x45faf27b…](https://explorer-studio.genlayer.com/tx/0x45faf27bbc4f7d9ceb088166e8639c99305c54763de1287cc089cb665255d85e) | register `0xA1D5A824…9385`; `gen_getContractCode` returns the repository file byte for byte (sha256 `d2d5d225…`) |
+| open S1, Fernhill Pottery: 1 GEN, 900 s for the maker, 420 s for the client, 10% per started minute late up to 50% | MAKER | [0x9d5337bd…](https://explorer-studio.genlayer.com/tx/0x9d5337bda4b3780af7e9fe80d297351189a9b38f176cc0bd4409b2a534b68eca) | S1 open |
+| a stranger closes S1 | STRANGER | [0xaa66c4e8…](https://explorer-studio.genlayer.com/tx/0xaa66c4e8d9639fd71e204a5d6ff7b782a54dac6acf3848dcd7a901824b89ce83) | refused: only the maker may |
+| commission S1 three times with the mug brief | CLIENT | [0x623b41f2…](https://explorer-studio.genlayer.com/tx/0x623b41f2c4a00fda3f2c053381a65a8b1600129be1027322a7e8b7d888900d12), [0x4cddfdcf…](https://explorer-studio.genlayer.com/tx/0x4cddfdcf412d660098713352649afd3e007f453799ffcf9812806f60b73d8f29), [0x9d1fe10c…](https://explorer-studio.genlayer.com/tx/0x9d1fe10cca11046b8945b61e93f0912446414e1f0ea65b505728f0cbb14f4ea1) | C1, C2, C3; 1 GEN held for each, no clock yet |
+| the maker commissions its own studio | MAKER | [0xbcf0a4b0…](https://explorer-studio.genlayer.com/tx/0xbcf0a4b0c16140f95e178ef02bc0767d86f8af0112b87621d71a41d70af6f11a) | refused, `ok: false`; **the 1 GEN came back in the same transaction** |
+| a stranger accepts C1 | STRANGER | [0xbd05cda7…](https://explorer-studio.genlayer.com/tx/0xbd05cda7184e321ea3498cae5b70a20d8ed61ead46bb47d2ff6cc95e344eefcd) | refused: only the maker may |
+| accept C3 | MAKER | [0x003b91cd…](https://explorer-studio.genlayer.com/tx/0x003b91cd9fdb59b3d5bd17963e7b5e7201f69ef115ab0e61fe04ce9ec173f3f0) | the clock starts, the move on the maker |
+| the client cancels C3 at once | CLIENT | [0x8c318688…](https://explorer-studio.genlayer.com/tx/0x8c3186889a96a9fec8dde656044a317f41002f6d0dfbb98b3e948e0ef854a0b6) | refused: the maker's cut is 0 of its 5000 bps cap |
+| accept C2 and deliver `mug-final.html` | MAKER | [0xf2ef89dd…](https://explorer-studio.genlayer.com/tx/0xf2ef89dd0106a5dc5213b12ec113c72e69afdb4f9a412e5867c6987d6b630fab), [0xaabdbb08…](https://explorer-studio.genlayer.com/tx/0xaabdbb08c5f9c24c63b5cbd034f9d1fc09535aefba0967f81005979a32338155) | every validator fetched the page: **delivered** (`fp b9d43c8d6508c6f2`), the move to the client |
+| claim silence on C2 at once | MAKER | [0xd2d9cf90…](https://explorer-studio.genlayer.com/tx/0xd2d9cf90bdf29a008662fc569bd3c381b5967588ac6e1a5a59ce3e5747f3aee1) | refused: the client has used 0 of its 420 seconds |
+| accept C1 | MAKER | [0x568bd9df…](https://explorer-studio.genlayer.com/tx/0x568bd9dfbac12cd861b3bbb59b50e93360e9f9d600b8bdccea9891716d6e436e) | the move on the maker |
+| the client writes while the maker holds the move | CLIENT | [0x633d062e…](https://explorer-studio.genlayer.com/tx/0x633d062ec50b99d5e1c7427a504a15ba04d66c42420216007b7df4dd3073c659) | **noted**: no model asked, the clock unchanged |
+| "which glaze should the description name?" (the brief leaves it open) | MAKER | [0x05e491f4…](https://explorer-studio.genlayer.com/tx/0x05e491f4996ed4627af1afa1d3c03921f8b3a3c598ff1726d474203a317ae2f7) | **pass**, 3 agree; the move to the client |
+| "I'll get back to you on that." | CLIENT | [0x2be8b306…](https://explorer-studio.genlayer.com/tx/0x2be8b3063d81256fe6db70152a00c865ad1bcafd50570b083d235b7f60e29dbe) | **keep**, 3 agree and 1 disagree; the move stays with the client |
+| "Sea-green, please." | CLIENT | [0xb4006d3c…](https://explorer-studio.genlayer.com/tx/0xb4006d3ce9682694d0ad49c3baee9e5e2f315e457c9a6e7684071c49e3f892f3) | **pass**, 3 agree and 1 disagree; the move back to the maker |
+| "should it be in English?" (the brief already says so) | MAKER | [0x1da80900…](https://explorer-studio.genlayer.com/tx/0x1da809004f50b7f42b5525fb5fadaa8b4d33367de40c3dba207a721844ada424) | **keep**: a question the brief answers does not stop the maker's clock |
+| "Working on it, nearly there." | MAKER | [0xcdbaca31…](https://explorer-studio.genlayer.com/tx/0xcdbaca3174f0a690dcf0959bf1d538e3cf1e189b2a75d466717d8608efb68d31) | **keep**: a progress update hands nothing over |
+| deliver `mug-placeholder.html` ("Draft coming soon.") | MAKER | [0x653de5a4…](https://explorer-studio.genlayer.com/tx/0x653de5a4fbd41cb72c3cf380a062dad2a66462de45f6fc407b3632ab7a4219bd) | **missing** (`fp 73903527c1f6a2b7`); the move stays with the maker |
+| deliver `mug-final.html` | MAKER | [0x5f952e14…](https://explorer-studio.genlayer.com/tx/0x5f952e14948b39ec9f67d29531194993c8a38fb3a57c12bf3d23923f6e050b8b) | **delivered**; the move to the client for its review |
+| accept the work | CLIENT | [0x42f1d5d1…](https://explorer-studio.genlayer.com/tx/0x42f1d5d17c8df757d6578f0f7728e07a3ceeac775df7df8b4d06c030d8846845) | the maker used 80 of its 900 seconds: no cut; **1 GEN to the maker in the same transaction** |
+| C2: the client sat past its 420 seconds (after the 300 s grace its delivery gave it); claim silence | MAKER | [0x8b229c3a…](https://explorer-studio.genlayer.com/tx/0x8b229c3a0d89a13d306731748249f5e17f6a02583c424d8b2c0ac633058672f2) | settled as accepted: 1 GEN to the maker |
+| C3: the maker sat until its cut reached the 50% cap; cancel late | CLIENT | [0x7574d2cc…](https://explorer-studio.genlayer.com/tx/0x7574d2ccd9f6c93c2f52989793e14c25cb41b2d7ea4e2caf1c3ef01592b2db19) | **the whole 1 GEN back to the client** |
+| cancel C3 again | CLIENT | [0xb686dce0…](https://explorer-studio.genlayer.com/tx/0xb686dce0ff0dd33f7ab56d24d2ad6cc73bba169876567813696ecccf9420a727) | refused: already cancelled |
+
+At the end `messages_of(C1)` read the thread as noted, pass, keep, pass, keep, keep, missing, delivered, and
+`studio(S1)` carried its public record: three commissions, two finished on time, one cancelled late, five presses and
+three deliveries judged. The contract's own balance was zero, and every account ended where the money table says: MAKER
+up 2 GEN, CLIENT down 2 GEN, STRANGER whole.
+
+Not part of this run: a delivery judged unclear, the outline and wrong-piece drafts, and a late cut between zero and the
+cap. They are covered by `tests/test_pure.py`, and the outline and teapot drafts are offered by the site's demo maker.
+
+After the run the site's demo maker, a separate throwaway key, opened S2 Fernhill Pottery copy desk on the same register
+(0.5 GEN; 20 minutes for the maker, 10 for the client; 10% per started 2 minutes late, at most 50%).
 
 ## Licence
 
