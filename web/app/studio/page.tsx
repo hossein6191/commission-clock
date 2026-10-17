@@ -1,8 +1,9 @@
 "use client";
 
 // The demo studio: Fernhill Pottery copy desk, its terms read live from the contract, its public
-// record, and the form that commissions it with the visitor's own wallet. The demo maker accepts
-// when asked and then makes the moves its buttons name in the commission's room.
+// record, the four demo jobs it plays, and the form that commissions it with the visitor's own wallet.
+// The demo maker accepts a request with one of those briefs, word for word, when asked, and then makes
+// the moves its buttons name in the commission's room.
 
 import * as React from "react";
 
@@ -14,7 +15,7 @@ import { RecordGrid } from "@/components/record-grid";
 import { useDemoStatus } from "@/components/use-demo";
 import { useAfterTx, useRead } from "@/components/use-read";
 import { readStudio } from "@/lib/chain";
-import { DEMO_STUDIO_NAME, DEMO_TERMS } from "@/lib/demo-studio";
+import { DEMO_JOBS, DEMO_STUDIO_NAME, DEMO_TERMS } from "@/lib/demo-studio";
 import { durationLabel, gen, pct } from "@/lib/format";
 import { TURN_GRACE, TURN_NOTICE } from "@/lib/rules";
 
@@ -32,9 +33,17 @@ export default function DemoStudioPage() {
           <p className="kicker text-ink-3">The demo studio{id ? ` · ${id}` : ""}</p>
           <h1 className="mt-1.5 text-[38px] sm:text-[54px]">{DEMO_STUDIO_NAME}</h1>
           <p className="mt-3 max-w-[60ch] text-[17px] text-ink-2">
-            A potter&apos;s studio that writes its own product descriptions. Commission it with your wallet and you play the client: the demo maker accepts, asks, stalls and
-            delivers when you press its buttons, and the validators decide after every move whose move it is now.
+            A potter&apos;s copy desk that writes its own product descriptions and takes small jobs from the shops on its street. Commission it with your wallet and one of its{" "}
+            {DEMO_JOBS.length} demo briefs and you play the client: the demo maker accepts, asks, stalls and delivers when you press its buttons, and the validators decide
+            after every move whose move it is now.
           </p>
+          <ul className="mt-3 flex max-w-[60ch] flex-col gap-1 text-[14.5px] text-ink-2">
+            {DEMO_JOBS.map((j) => (
+              <li key={j.key}>
+                <span className="font-semibold text-ink">{j.title}</span>: the brief leaves open {j.open}, so the maker&apos;s real question is real.
+              </li>
+            ))}
+          </ul>
           <DemoNote className="mt-4" />
         </div>
         <ChessClock
@@ -63,7 +72,17 @@ export default function DemoStudioPage() {
       ) : (
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
           <section aria-labelledby="commission-it" className="sheet min-w-0 p-4 sm:p-6">
-            <Section n={1} id="commission-it" title="Commission it" sub={<>The fee is held by the contract, not paid to the maker, until the commission settles. Withdraw before the maker accepts and all of it comes back.</>} />
+            <Section
+              n={1}
+              id="commission-it"
+              title="Commission it"
+              sub={
+                <>
+                  Pick one of the {DEMO_JOBS.length} demo briefs: the demo maker plays only those, word for word. The fee is held by the contract, not paid to the maker, until the
+                  commission settles. Withdraw before the maker accepts and all of it comes back.
+                </>
+              }
+            />
             <CommissionForm s={s} />
           </section>
           <div className="flex min-w-0 flex-col gap-6">

@@ -4,7 +4,8 @@
 // that holds the move is a press: one round plunger, "Press: send and hand over the move", and the
 // network decides whether it really does. From the other side it is a brass plate: the message is
 // noted and the holder's clock keeps running. The maker also delivers a page, read on the live web.
-// Every field has its one-click suggestions, each with what the network should make of it.
+// Every field has its one-click suggestions, each with what the network should make of it: the
+// commission's demo job's lines and pages when its brief is one of the four demo briefs.
 
 import * as React from "react";
 
@@ -12,11 +13,11 @@ import { Field } from "@/components/bits";
 import { Brass, Plunger } from "@/components/button";
 import { Suggest } from "@/components/suggest";
 import { draftsCommit, REPO_URL } from "@/lib/config";
-import { DRAFTS, draftUrl, repoOf } from "@/lib/demo-studio";
+import { DEMO_JOBS, draftUrl, jobOfBrief, repoOf } from "@/lib/demo-studio";
 import { MOCK_COMMIT, MOCK_REPO } from "@/lib/chain-mock";
 import { isMock } from "@/lib/chain";
 import { MAX_NOTE, MAX_TEXT, deliveryProblem, messageProblem, plain, type Holder, type Side } from "@/lib/rules";
-import { NOTE_CHIPS, messageChipsFor } from "@/lib/suggestions";
+import { chipsFor, messageChipsFor } from "@/lib/suggestions";
 
 const noopSubscribe = () => () => {};
 /** The site's own origin in the browser ("" on the server). */
@@ -28,12 +29,16 @@ function useOrigin(): string {
   );
 }
 
-/** The pages a maker can deliver with one click: the drafts pinned to a commit, or this site's own copies when it is served over https. */
-export function deliveryChips(origin: string): { label: string; value: string }[] {
+/**
+ * The pages a maker can deliver with one click: the brief's demo job's drafts (the mug's for any other
+ * brief), pinned to a commit, or this site's own copies when it is served over https.
+ */
+export function deliveryChips(origin: string, brief = ""): { label: string; value: string }[] {
+  const drafts = (jobOfBrief(brief) ?? DEMO_JOBS[0]).drafts;
   const repo = isMock ? MOCK_REPO : repoOf(REPO_URL);
   const commit = isMock ? MOCK_COMMIT : draftsCommit();
-  if (repo && commit) return DRAFTS.map((d) => ({ label: `${d.file} (pinned)`, value: draftUrl(repo, commit, d.file) }));
-  if (origin.startsWith("https://")) return DRAFTS.map((d) => ({ label: `${d.file} (this site)`, value: `${origin}/drafts/${d.file}` }));
+  if (repo && commit) return drafts.map((d) => ({ label: `${d.file} (pinned)`, value: draftUrl(repo, commit, d.file) }));
+  if (origin.startsWith("https://")) return drafts.map((d) => ({ label: `${d.file} (this site)`, value: `${origin}/drafts/${d.file}` }));
   return [];
 }
 
@@ -41,6 +46,7 @@ export function Composer({
   role,
   holder,
   deliveries,
+  brief,
   busy,
   onSay,
   onDeliver,
@@ -49,6 +55,8 @@ export function Composer({
   role: Side;
   holder: Holder;
   deliveries: number;
+  /** the commission's brief: it picks the demo job whose suggestions are offered */
+  brief: string;
   busy: boolean;
   onSay: (text: string, press: boolean) => void;
   onDeliver: (url: string, note: string) => void;
@@ -61,10 +69,10 @@ export function Composer({
   const [triedDelivery, setTriedDelivery] = React.useState(false);
   const origin = useOrigin();
   const press = holder === role;
-  const chips = messageChipsFor(role, holder, deliveries);
+  const chips = messageChipsFor(role, holder, deliveries, brief);
   const sent = plain(text);
   const problem = messageProblem(sent);
-  const pages = deliveryChips(origin);
+  const pages = deliveryChips(origin, brief);
   const deliverProblem = deliveryProblem(url.trim(), plain(note));
   const other = role === "maker" ? "client" : "maker";
 
@@ -144,7 +152,7 @@ export function Composer({
             </Field>
             <Field id="note" label="Note (optional)" count={`${[...plain(note)].length}/${MAX_NOTE}`}>
               <input id="note" className="field" value={note} onChange={(e) => setNote(e.target.value)} />
-              <Suggest label="Suggested notes" chips={NOTE_CHIPS.map((n) => ({ label: n || "(no note)", value: n }))} onPick={setNote} isOn={(v) => v === note} />
+              <Suggest label="Suggested notes" chips={chipsFor(brief).deliveryNotes.map((n) => ({ label: n || "(no note)", value: n }))} onPick={setNote} isOn={(v) => v === note} />
             </Field>
           </div>
           <div className="mt-4">

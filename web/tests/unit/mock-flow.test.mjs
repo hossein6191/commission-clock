@@ -5,7 +5,8 @@
 // A visitor commissions the demo studio and plays the client while the demo maker makes every move in
 // its script: a sham question and a promise keep the move, three wrong pages are read as missing, a
 // real question passes it, the client's answers pass it back or keep it, the finished page and the
-// revised one are read as delivered, and the client accepts. Then every way a commission settles
+// revised one are read as delivered, and the client accepts; the same for each of the four demo jobs,
+// and nothing at all from the demo maker on any other brief. Then every way a commission settles
 // (accepted on time and late, by silence, lapsed, cancelled late with and without a delivery,
 // withdrawn, declined), each first refused while it is not yet open and told how long, and every
 // refusal a party can meet, with its way out. After every step no atto is created or lost and the
@@ -16,7 +17,8 @@ import assert from "node:assert/strict";
 
 import * as mock from "../../lib/chain-mock.ts";
 import { calls } from "../../lib/calls.ts";
-import { DEMO_BRIEF, DEMO_TERMS, DRAFTS, draftOf } from "../../lib/demo-studio.ts";
+import { DEMO_BRIEF, DEMO_JOBS, DEMO_TERMS, DRAFTS, LATER, draftOf, jobOf, offScript } from "../../lib/demo-studio.ts";
+import { JOB_CHIPS } from "../../lib/suggestions.ts";
 import { capAfter } from "../../lib/clock.ts";
 
 const { VISITOR, DEMO_MAKER, MY_MAKER, PASSER_BY } = mock;
@@ -69,8 +71,8 @@ async function demo(cid, action) {
 
 const refusal = (s) => (s.exec === "ERROR" ? s.message : s.result?.ok === false ? s.result.reason : "");
 
-async function commissionDemo() {
-  const r = await send(VISITOR, calls.requestCommission("S1", DEMO_BRIEF, FEE));
+async function commissionDemo(brief = DEMO_BRIEF) {
+  const r = await send(VISITOR, calls.requestCommission("S1", brief, FEE));
   assert.equal(r.result.ok, true, "commissioned");
   return r.result.commission;
 }
@@ -118,7 +120,7 @@ test("the demo maker's whole script, and the verdict each move earns", async () 
   await expectStep(await demo(cid, "final"), "delivered", "client", "the finished page");
   c = await view("commission", [cid]);
   assert.equal(c.deliveries, 1);
-  assert.equal(c.last_fp, draftOf("final").fp, "the fingerprint of the finished page is recorded");
+  assert.equal(c.last_fp, draftOf("final", "mug").fp, "the fingerprint of the finished page is recorded");
   await expectStep(await demo(cid, "question"), "noted", "client", "the maker writes off its turn");
   await expectStep(await send(VISITOR, calls.say(cid, "Please add one line saying it can be gift wrapped at checkout.")), "pass", "maker", "a specific revision");
   await expectStep(await demo(cid, "revised"), "delivered", "client", "the revised page");
@@ -134,6 +136,76 @@ test("the demo maker's whole script, and the verdict each move earns", async () 
   assert.equal(BigInt(done.result.to_maker) + BigInt(done.result.to_client), FEE);
   assert.equal(await mock.balanceOf(DEMO_MAKER), makerBefore + BigInt(done.result.to_maker), "the maker was paid in the same transaction");
   await conserved(total, "accepted");
+});
+
+for (const key of ["bakery", "cafe", "bike"]) {
+  test(`the ${key} job: the demo maker's whole script on its brief, and the verdict each move and each suggested reply earns`, async () => {
+    const job = jobOf(key);
+    const chips = JOB_CHIPS[key];
+    await mock.faucet(VISITOR);
+    const total = await world();
+    const cid = await commissionDemo(job.brief);
+    await demo(cid, "accept");
+    const verdicts = [];
+    const expectStep = async (s, verdict, holder, step) => {
+      assert.equal(s.result?.verdict, verdict, `${key}, ${step}: ${refusal(s)}`);
+      assert.equal(s.result.holder, holder, `${key}, ${step}: the move is the ${holder}'s`);
+      verdicts.push(verdict);
+      await conserved(total, `${key}, ${step}`);
+    };
+    await expectStep(await demo(cid, "sham"), "keep", "maker", "the sham question");
+    await expectStep(await demo(cid, "update"), "keep", "maker", "the progress update");
+    await expectStep(await send(VISITOR, calls.say(cid, chips.notes[0].text)), "noted", "maker", "the client writes off its turn");
+    for (const page of ["placeholder", "outline", "wrong"]) await expectStep(await demo(cid, page), "missing", "maker", `the ${page} page`);
+    await expectStep(await demo(cid, "question"), "pass", "client", "the real question");
+    await expectStep(await send(VISITOR, calls.say(cid, LATER)), "keep", "client", "a promise from the client");
+    await expectStep(await send(VISITOR, calls.say(cid, chips.reviews[2].text)), "unclear", "client", "a vague line");
+    await expectStep(await send(VISITOR, calls.say(cid, chips.answers[0].text)), "pass", "maker", "the concrete answer");
+    await expectStep(await demo(cid, "final"), "delivered", "client", "the finished page");
+    let c = await view("commission", [cid]);
+    assert.equal(c.last_fp, draftOf("final", key).fp, "the fingerprint of the job's finished page is recorded");
+    assert.ok(c.last_url.endsWith(`/drafts/${draftOf("final", key).file}`));
+    await expectStep(await send(VISITOR, calls.say(cid, chips.reviews[1].text)), "keep", "client", "praise");
+    await expectStep(await send(VISITOR, calls.say(cid, chips.reviews[0].text)), "pass", "maker", "a specific revision");
+    await expectStep(await demo(cid, "revised"), "delivered", "client", "the revised page");
+    c = await view("commission", [cid]);
+    assert.equal(c.last_fp, draftOf("revised", key).fp);
+    assert.deepEqual([...new Set(verdicts)].sort(), ["delivered", "keep", "missing", "noted", "pass", "unclear"]);
+    const thread = await view("messages_of", [cid, 0, 20]);
+    assert.deepEqual(
+      thread.rows.filter((m) => m.role === "maker" && m.kind === "say").map((m) => m.text),
+      [job.actions[1].text, job.actions[2].text, job.actions[0].text],
+      "every word the maker wrote is its job's own script",
+    );
+    const done = await send(VISITOR, calls.acceptWork(cid));
+    assert.equal(done.result.status, "accepted");
+    await conserved(total, `${key} accepted`);
+  });
+}
+
+test("on any other brief the demo maker neither accepts nor moves, and says why; a page of another job reads as missing", async () => {
+  await mock.faucet(VISITOR);
+  const total = await world();
+  const other = "Wording for a wedding invitation: two names, a date in June, a garden venue, and an RSVP line. Warm, not formal.";
+  const cid = await commissionDemo(other);
+  assert.equal((await mock.demoAccept(cid)).reason, offScript(cid, true));
+  for (const k of ["question", "final"]) assert.equal((await mock.demoAct(cid, k)).reason, offScript(cid, false));
+  assert.equal((await view("commission", [cid])).status, "requested", "nothing was signed");
+  // Near a demo brief is not one: word for word.
+  const near = await commissionDemo(jobOf("bakery").brief.replace("Friendly", "Warm"));
+  assert.equal((await mock.demoAccept(near)).reason, offScript(near, true));
+  // The client's way out is the whole fee back.
+  assert.equal((await send(VISITOR, calls.withdrawRequest(cid))).result.status, "withdrawn");
+  assert.equal((await send(VISITOR, calls.withdrawRequest(near))).result.status, "withdrawn");
+  await conserved(total, "off-script briefs withdrawn");
+  // On a demo job's commission, another job's finished page is about something else: missing.
+  const r = await send(VISITOR, calls.requestCommission("S2", jobOf("cafe").brief, 10n ** 18n));
+  const c2 = r.result.commission;
+  await send(MY_MAKER, calls.accept(c2));
+  assert.equal((await send(MY_MAKER, calls.deliver(c2, mock.mockDraft("final", "bakery"), ""))).result.verdict, "missing");
+  assert.equal((await send(MY_MAKER, calls.deliver(c2, mock.mockDraft("final", "mug"), ""))).result.verdict, "missing");
+  assert.equal((await send(MY_MAKER, calls.deliver(c2, mock.mockDraft("final", "cafe"), ""))).result.verdict, "delivered");
+  await conserved(total, "another job's page");
 });
 
 test("the demo maker makes one move at a time, only from its script, only on its own studio", async () => {
@@ -314,15 +386,18 @@ test("every refusal a party can meet leaves it a way out", async () => {
   await conserved(total, "refusals");
 });
 
-test("the demo drafts are the five the demo maker can deliver, each read as the demo expects", () => {
-  assert.deepEqual(
-    DRAFTS.map((d) => [d.key, d.expect]),
-    [
-      ["placeholder", "missing"],
-      ["outline", "missing"],
-      ["wrong", "missing"],
-      ["final", "delivered"],
-      ["revised", "delivered"],
-    ],
-  );
+test("the demo drafts are five per job the demo maker can deliver, each read as the demo expects", () => {
+  for (const j of DEMO_JOBS)
+    assert.deepEqual(
+      j.drafts.map((d) => [d.key, d.expect]),
+      [
+        ["placeholder", "missing"],
+        ["outline", "missing"],
+        ["wrong", "missing"],
+        ["final", "delivered"],
+        ["revised", "delivered"],
+      ],
+      j.key,
+    );
+  assert.equal(DRAFTS.length, 20);
 });

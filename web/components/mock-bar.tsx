@@ -20,7 +20,7 @@ export function MockBar() {
       <div className="mx-auto flex max-w-[1160px] flex-col gap-2 px-4 py-2 text-xs xl:flex-row xl:items-center xl:justify-between">
         <p>
           <strong className="font-bold">Demo build.</strong> An in-memory copy of the contract. No model is asked and no page is fetched here: the demo maker&apos;s messages,
-          the suggested replies and the five drafts are judged as the demo expects, where on chain every validator judges for itself. A reload starts again.
+          the suggested replies and the drafts of the four demo jobs are judged as the demo expects, where on chain every validator judges for itself. A reload starts again.
         </p>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <label htmlFor="mock-persona" className="shrink-0 font-bold">

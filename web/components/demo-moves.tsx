@@ -1,23 +1,26 @@
 "use client";
 
-// "What the maker does next": the demo maker's fixed script as buttons, each with the outcome the
-// network should reach from where the move is now, so a visitor playing the client can see every
-// verdict on purpose. A press of a button asks the site's server; the demo maker signs with its own
-// key, and nothing the visitor typed ever goes with it.
+// "What the maker does next": the fixed script of the commission's demo job as buttons, each with the
+// outcome the network should reach from where the move is now, so a visitor playing the client can see
+// every verdict on purpose. A press of a button asks the site's server; the demo maker signs with its
+// own key, and nothing the visitor typed ever goes with it. On a commission whose brief is not one of
+// the demo briefs, word for word, it says why there are no buttons instead.
 
 import { Brass } from "@/components/button";
-import { DEMO_ACTIONS, expectedHolder, expectedVerdict, type DemoAction } from "@/lib/demo-studio";
+import { DEMO_JOBS, expectedHolder, expectedVerdict, type DemoAction, type DemoJob } from "@/lib/demo-studio";
 import { stampOf } from "@/lib/receipt";
 import type { Holder } from "@/lib/rules";
 import { cx } from "@/lib/cx";
 
 export function DemoMoves({
+  job,
   holder,
   busy,
   drafts,
   draftsReason,
   onAct,
 }: {
+  job: DemoJob;
   holder: Holder;
   busy: boolean;
   drafts: boolean;
@@ -35,15 +38,15 @@ export function DemoMoves({
         What the maker does next
       </h2>
       <p className="mt-1 max-w-[62ch] text-[14px] text-ink-2">
-        You play the client. Press one of these and the demo maker makes that move on chain, from its own key; next to each is what the network should agree, given that the
-        move is now {holder ? `the ${holder}'s` : "nobody's"}.
+        The demo job: <strong className="font-semibold text-ink">{job.title}</strong>. You play the client. Press one of these and the demo maker makes that move on chain,
+        from its own key; next to each is what the network should agree, given that the move is now {holder ? `the ${holder}'s` : "nobody's"}.
       </p>
       {groups.map((g) => (
         <div key={g.kind} className="mt-4">
           <p className="text-[12px] font-bold tracking-[0.1em] text-ink-3 uppercase">{g.title}</p>
           {g.kind === "deliver" && !drafts && <p className="mt-1 text-[13px] text-amber-ink">Not available yet: {draftsReason}.</p>}
           <ul className="mt-1.5 flex flex-col gap-2">
-            {DEMO_ACTIONS.filter((a) => a.kind === g.kind).map((a) => {
+            {job.actions.filter((a) => a.kind === g.kind).map((a) => {
               const verdict = expectedVerdict(a, holder);
               const after = expectedHolder(a, holder);
               const stamp = stampOf({ kind: a.kind, verdict, role: "maker", fp: "" }, "visitor");
@@ -66,6 +69,29 @@ export function DemoMoves({
           </ul>
         </div>
       ))}
+    </section>
+  );
+}
+
+/** Why the demo maker makes no move on a commission of its studio: the brief is not one of its demo jobs, word for word. */
+export function OffScriptNote({ status }: { status: string }) {
+  return (
+    <section aria-labelledby="off-script" className="sheet p-4 sm:p-5">
+      <p className="kicker text-ink-3">The demo maker</p>
+      <h2 id="off-script" className="mt-0.5 text-[22px]">
+        No demo moves for this brief
+      </h2>
+      <p className="mt-1 max-w-[62ch] text-[14px] text-ink-2">
+        The demo maker plays {DEMO_JOBS.length} jobs, and picks one by the brief, word for word. This brief is not one of them, so it has no script and no drafts here
+        {status === "requested"
+          ? " and will not accept it. Withdraw for the whole fee back, then commission the demo studio again with one of its brief chips."
+          : ". Its clock still runs against the maker, and the waiting panel above says when you may cancel."}
+      </p>
+      <ul className="mt-2 list-disc pl-5 text-[13.5px] text-ink-3">
+        {DEMO_JOBS.map((j) => (
+          <li key={j.key}>{j.title}</li>
+        ))}
+      </ul>
     </section>
   );
 }

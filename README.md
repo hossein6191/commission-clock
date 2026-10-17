@@ -283,7 +283,8 @@ brief:
 > an online shop. Warm, plain English. Mention that it is dishwasher safe.
 
 `drafts/` holds the pages a maker can deliver, as plain text, so every
-validator reads the same words:
+validator reads the same words. The mug's five are these (the site's three
+other demo jobs and their pages are under [The site](#the-site)):
 
 | page | what it is | judged |
 |---|---|---|
@@ -360,7 +361,7 @@ The thread changes one thing per message:
 
 ```
 contracts/commission_clock.py   the contract
-drafts/                         the five demo pages a maker can deliver
+drafts/                         the demo pages a maker can deliver: four demo jobs, five pages each
 tests/test_pure.py              the offline suite, including the consensus rounds with a world per node
 tests/MUTATIONS.md              every defence removed in turn, and the test that caught it
 tests/on_chain/smoke.mjs        a throwaway-account run against Studio
@@ -425,11 +426,12 @@ with what the network agreed.
 - `/` the promise in one minute, with a whole commission played on the real
   clock arithmetic at 25 times speed, and how the money moves.
 - `/studio` the demo studio, Fernhill Pottery copy desk, with its terms read
-  live; commission it with one wallet and the brief chip.
+  live; commission it with one wallet and one of its four demo brief chips.
 - `/c/C7` a commission's room: the clock, the thread, the composer (a
   message from the side that holds the move is a press; from the other side
-  it is noted), the demo maker's next moves, a waiting panel while the
-  validators judge a press or read a draft page, and the result slip.
+  it is noted, and its suggested replies are the commission's demo job's), the
+  demo maker's next moves for that job, a waiting panel while the validators
+  judge a press or read a draft page, and the result slip.
 - `/studios`, `/studios/S1` every studio and its public record; `/maker` open
   a studio and keep your own commissions moving; `/mine` your commissions;
   `/ledger` the contract's totals; `/how` the four askings word for word, the
@@ -438,20 +440,36 @@ with what the network agreed.
 **One wallet tries everything.** A demo maker, a throwaway Studio key the
 site's server holds in `DEMO_MAKER_KEY`, runs the demo studio on short terms
 (0.5 GEN; 20 minutes for the maker, 10 for the client; 10% of the fee per
-started 2 minutes late, at most 50%). A visitor commissions it and plays the
-client; in the room the demo maker accepts and makes the moves its buttons
-name, each shown with the verdict the network should reach: a real question
-(the move goes over), a sham question and a progress update (it stays), a
-placeholder, an outline and the wrong piece (missing), the finished
-description and a revised one (delivered). It signs only those fixed moves:
-`POST /api/demo/act` takes a commission id and one of eight action keys, and
-nothing a visitor types ever reaches its key. `GET /api/demo/status` says
+started 2 minutes late, at most 50%). It plays four demo jobs, and a visitor
+commissions the studio with one of their briefs (the brief chips) and plays
+the client. Each brief leaves one thing open, so the maker's real question is
+real, and states the thing its sham question asks about:
+
+| demo job | left open: the real question | already in the brief: the sham question | its pages in `drafts/` |
+|---|---|---|---|
+| the stoneware mug | which glaze to name | "Should the description be written in English?" | `mug-final`, `mug-revised`, `mug-placeholder`, `mug-outline`, `teapot` (the wrong piece) |
+| Larkrise Bakery's 120-word welcome email | what time the Saturday sourdough comes out of the oven | "How long should the welcome email be?" | `bakery-final`, `bakery-revised`, `bakery-placeholder`, `bakery-outline`, `bakery-job-advert` (the wrong piece) |
+| Tidepool Cafe's chalkboard menu, five drinks and three cakes | the eight prices | "What tone should the menu lines have?" | `cafe-final`, `cafe-revised`, `cafe-placeholder`, `cafe-outline`, `cafe-quiz-night` (the wrong piece) |
+| the 100-word About us of Spokes & Sprockets, a bike repair shop | how many years the shop has been open | "Should the About us text be split into several paragraphs?" | `bike-final`, `bike-revised`, `bike-placeholder`, `bike-outline`, `bike-puncture-guide` (the wrong piece) |
+
+The demo maker picks the job by the commission's brief, word for word; on a
+commission with any other brief it neither accepts nor moves, and the room
+says why. In the room it accepts and makes the moves its buttons name, the
+same eight in every job, each shown with the verdict the network should
+reach: a real question (the move goes over), a sham question and a progress
+update (it stays), a placeholder, an outline and the wrong piece (missing),
+the finished piece and a revised one (delivered). The client's suggested
+replies are the job's own: a concrete answer and a specific revision pass the
+move back, "I'll get back to you" and praise keep it, a vague request is
+unclear. It signs only those fixed moves: `POST /api/demo/act` takes a
+commission id and one of eight action keys, the brief only picks which job's
+move that key names, and nothing a visitor types ever reaches its key. `GET /api/demo/status` says
 whether it is online or exactly why not (no key, a bad key, no contract,
 Studio's RPC down, no GEN on its account, or no demo studio yet), and whether
 it can deliver. The drafts it delivers are the files in `drafts/`, read from
 raw.githubusercontent.com at the commit set as `DRAFTS_COMMIT` in
-`web/lib/config.ts`; the site serves copies under `/drafts/` so a visitor can
-read what every validator read.
+`web/lib/config.ts` (a commit that holds all twenty), and the site serves
+copies under `/drafts/` so a visitor can read what every validator read.
 
 Every in-between state says, in the same six lines, what is happening, how
 long it takes, what is needed from you, who the clock runs against right now,
@@ -474,7 +492,8 @@ against `contracts/commission_clock.py`, the clock arithmetic and `rules()`
 compared with the contract's own Python, every verdict and every settlement
 through the mock, seeded random journeys with conservation checked after
 every step, the waiting copy for every state and role, every suggestion
-inside the limits, the demo maker's routes, and the hygiene of every file.
+inside the limits, every demo job's script, pages and fingerprints, the demo
+maker's routes, and the hygiene of every file.
 
 To bring the demo maker online after the contract is deployed and the
 repository pushed: set `DEMO_CONTRACT` and `DRAFTS_COMMIT` in

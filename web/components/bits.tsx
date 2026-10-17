@@ -134,7 +134,7 @@ export function DemoNote({ className }: { className?: string }) {
       <div className={cx("text-sm text-ink-2", className)}>
         <p>
           <span aria-hidden="true" className="mr-1.5 inline-block size-2.5 rounded-full bg-felt align-middle" />
-          The demo maker is at the table{s.maker && <> as <Addr address={s.maker} /></>}: it accepts your request and makes the moves its buttons name, nothing else.
+          The demo maker is at the table{s.maker && <> as <Addr address={s.maker} /></>}: it accepts a request that carries one of its four demo briefs, word for word, and makes the moves its buttons name, nothing else.
         </p>
         {!s.drafts && (
           <p className="mt-1 text-amber-ink">

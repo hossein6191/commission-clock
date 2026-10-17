@@ -1,8 +1,10 @@
 // POST /api/demo/act {commission, action}: the demo maker does ONE thing from its fixed script on an
 // active commission of the demo studio: "question", "sham" or "update" (a message), or "placeholder",
 // "outline", "wrong", "final" or "revised" (a delivery of a draft pinned to one commit). The action is
-// a key into that list; no text from the visitor is ever signed. One move at a time per commission,
-// rate-limited; answers the transaction hash or why not. Nothing here ever logs or returns the key.
+// a key into that list; the script is the demo job whose brief the commission carries word for word
+// (lib/demo-studio.ts), and a commission with any other brief is refused. No text from the visitor is
+// ever signed. One move at a time per commission, rate-limited; answers the transaction hash or why
+// not. Nothing here ever logs or returns the key.
 
 import { ACTION_KEYS } from "@/lib/demo-studio";
 import { sendDemo } from "@/lib/demo-server";

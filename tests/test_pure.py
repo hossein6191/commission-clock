@@ -1761,7 +1761,12 @@ class TestDrafts:
 
     def test_an_honest_network_judges_every_draft_as_the_demo_says(self):
         want = {FINAL: "delivered", REVISED: "delivered", PLACEHOLDER: "missing", OUTLINE: "missing",
-                TEAPOT: "missing"}
+                TEAPOT: "missing",
+                # the site's three other demo jobs: against this mug brief each is about something else
+                **{BASE + job + "-" + page + ".html": "missing" for job, pages in (
+                    ("bakery", ("final", "revised", "placeholder", "outline", "job-advert")),
+                    ("cafe", ("final", "revised", "placeholder", "outline", "quiz-night")),
+                    ("bike", ("final", "revised", "placeholder", "outline", "puncture-guide"))) for page in pages}}
         assert set(want) == set(WEB)
         for address, verdict in want.items():
             c, sid, cid = staged()

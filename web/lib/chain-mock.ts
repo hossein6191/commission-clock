@@ -5,14 +5,14 @@
 // handed-over turn, since never moving back, the notice before a settlement against the holder), the
 // late cut, where every atto goes, the counters, and every view answered in the contract's own JSON
 // shape, so the mappers in lib/chain.ts run on the same rows in both modes. The one thing it cannot
-// do is ask a model or fetch a page: a press is judged as SCRIPTED from the demo maker's three
-// messages and the client's suggested lines (any other message lands unclear here), a delivery is
-// read from what the five demo drafts are (any other address cannot be fetched and stores nothing),
-// and the demo bar says so on every page.
+// do is ask a model or fetch a page: a press is judged as SCRIPTED from the demo job its brief is, the
+// demo maker's three messages and the client's suggested lines for that job (any other message lands
+// unclear here), a delivery is read from what the demo drafts are against that job (any other address
+// cannot be fetched and stores nothing), and the demo bar says so on every page.
 //
 // The visitor acts as one of a few demo accounts. The demo maker runs Fernhill Pottery copy desk and
-// acts when its buttons are pressed (demoAccept and demoAct, the in-memory twins of POST
-// /api/demo/accept and /api/demo/act). A few commissions are seeded so the ledger and the receipts
+// acts when its buttons are pressed, on the four demo briefs only (demoAccept and demoAct, the
+// in-memory twins of POST /api/demo/accept and /api/demo/act). A few commissions are seeded so the ledger and the receipts
 // have something to show, and the clock can be moved on so an allowance can be seen running out.
 // State lasts as long as the tab.
 
@@ -20,7 +20,7 @@ import type { Call, DemoAnswer, DemoStatus, TxStatus, WriteFn } from "./types.ts
 import { notify } from "./browser-store.ts";
 import { REPO_URL } from "./config.ts";
 import { capAfter, charged, cutOf, grace, lateTerms, live, moveTo, opensIn, type ClockState } from "./clock.ts";
-import { DEMO_ABOUT, DEMO_ACTIONS, DEMO_BRIEF, DEMO_STUDIO_NAME, DEMO_TERMS, actionOf, demoActProblem, draftOf, draftUrl, repoOf, scriptedDelivery, scriptedPress, type DraftKey } from "./demo-studio.ts";
+import { DEMO_ABOUT, DEMO_BRIEF, DEMO_STUDIO_NAME, DEMO_TERMS, actionOf, demoActProblem, demoActionFor, draftOf, draftUrl, repoOf, scriptedDelivery, scriptedPress, type DraftKey, type JobKey } from "./demo-studio.ts";
 import {
   ACCEPT_WINDOW,
   ADDRESS_CHARS,
@@ -80,8 +80,8 @@ export const MOCK_CONTRACT = "0x0000000000000000000000000000000000c10c4e";
 /** The commit the demo build pretends its drafts are pinned to. */
 export const MOCK_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 export const MOCK_REPO = repoOf(REPO_URL) || "demo-owner/commission-clock";
-/** The address of a demo draft under the demo build's pretend commit. */
-export const mockDraft = (key: DraftKey): string => draftUrl(MOCK_REPO, MOCK_COMMIT, draftOf(key).file);
+/** The address of a demo job's draft under the demo build's pretend commit (the mug's by default). */
+export const mockDraft = (key: DraftKey, job: JobKey = "mug"): string => draftUrl(MOCK_REPO, MOCK_COMMIT, draftOf(key, job).file);
 
 const inBrowser = typeof window !== "undefined";
 const delay = (ms: number) => (inBrowser ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve());
@@ -481,7 +481,7 @@ function say(c: Ctx, rawId: unknown, rawText: unknown): Row {
   const now = clock(c);
   const role: Side = who === co.maker ? "maker" : "client";
   const pressed = role === co.holder;
-  const verdict: MessageVerdict = pressed ? scriptedPress(text) : "noted";
+  const verdict: MessageVerdict = pressed ? scriptedPress(text, co.brief) : "noted";
   const k = log(cid, co, role, "say", text, "", verdict, "", now);
   const s = studioRows.get(co.studio_id)!;
   if (pressed) {
@@ -517,7 +517,7 @@ function deliver(c: Ctx, rawId: unknown, rawUrl: unknown, rawNote: unknown): Row
   problem = textProblem(note, 0, MAX_NOTE, "the note");
   if (problem) fail(problem);
   const now = clock(c);
-  const reading = scriptedDelivery(url);
+  const reading = scriptedDelivery(url, co.brief);
   if ("error" in reading) throw new NotSettled(reading.error);
   const { verdict, fp } = reading;
   const k = log(cid, co, "maker", "deliver", note, url, verdict, fp, now);
@@ -974,13 +974,13 @@ export function demoStatus(): DemoStatus {
 /** The demo maker's last transaction per commission: it acts one move at a time. */
 const lastDemoTx = new Map<string, string>();
 
-function demoCommission(raw: string): { id: string; studio: string; status: string } | null {
+function demoCommission(raw: string): { id: string; studio: string; status: string; brief: string } | null {
   const id = pyStrip(String(raw ?? "")).slice(0, ID_CHARS);
   const c = commissionRows.get(id);
-  return c ? { id, studio: c.studio_id, status: c.status } : null;
+  return c ? { id, studio: c.studio_id, status: c.status, brief: c.brief } : null;
 }
 
-/** The in-memory twin of POST /api/demo/accept: the demo maker accepts a request made of its studio. */
+/** The in-memory twin of POST /api/demo/accept: the demo maker accepts a request made of its studio with a demo brief. */
 export async function demoAccept(raw: string): Promise<DemoAnswer> {
   seed();
   await delay(300);
@@ -994,18 +994,17 @@ export async function demoAccept(raw: string): Promise<DemoAnswer> {
   return { ok: true, hash };
 }
 
-/** The in-memory twin of POST /api/demo/act: the demo maker does one thing from its fixed script. */
+/** The in-memory twin of POST /api/demo/act: the demo maker does one thing from the fixed script of the commission's demo job. */
 export async function demoAct(raw: string, actionKey: string): Promise<DemoAnswer> {
   seed();
   await delay(300);
   const c = demoCommission(raw);
-  const action = actionOf(actionKey);
-  const problem = demoActProblem(c, "S1", action, true);
+  const problem = demoActProblem(c, "S1", actionKey, true);
   if (problem) return { ok: false, reason: problem };
   const last = lastDemoTx.get(c!.id);
   if (last && !isDone(last)) return { ok: false, reason: `the demo maker is still waiting for its last move on ${c!.id} to be final; try again once it is` };
-  const a = action!;
-  const hash = a.kind === "say" ? send(DEMO_MAKER, "say", [c!.id, a.text], 0n) : send(DEMO_MAKER, "deliver", [c!.id, mockDraft(a.draft!), a.text], 0n);
+  const a = demoActionFor(c!.brief, actionKey)!;
+  const hash = a.kind === "say" ? send(DEMO_MAKER, "say", [c!.id, a.text], 0n) : send(DEMO_MAKER, "deliver", [c!.id, mockDraft(a.draft!, a.job), a.text], 0n);
   lastDemoTx.set(c!.id, hash);
   return { ok: true, hash };
 }
@@ -1023,7 +1022,7 @@ function at(sender: string, now: number, fn: WriteFn, args: unknown[], value = 0
   return run(fn, args, { sender, value, now });
 }
 
-const sayOf = (key: string) => DEMO_ACTIONS.find((a) => a.key === key)!.text;
+const sayOf = (key: string) => actionOf(key, "mug")!.text;
 
 function seed(): void {
   if (seeded) return;

@@ -9,8 +9,11 @@ import assert from "node:assert/strict";
 
 import * as mock from "../../lib/chain-mock.ts";
 import { calls } from "../../lib/calls.ts";
-import { ACTION_KEYS, CLIENT_LINES, DEMO_BRIEF } from "../../lib/demo-studio.ts";
+import { ACTION_KEYS, DEMO_BRIEF, DEMO_JOBS } from "../../lib/demo-studio.ts";
 import { BRIEF_CHIPS } from "../../lib/suggestions.ts";
+
+/** A brief that is no demo job's: the demo maker refuses every move on it. */
+const OFF_SCRIPT = "Wording for a wedding invitation: two names, a date in June, a garden venue, and an RSVP line. Warm, not formal.";
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -81,8 +84,8 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
     return s;
   })();
   await check(total, "seeded");
-  const texts = [...CLIENT_LINES.map((l) => l.text), "Should the description be written in English?", "Working on it, nearly there.", "ok", "two\nlines"];
-  const pages = [mock.mockDraft("final"), mock.mockDraft("placeholder"), mock.mockDraft("revised"), "https://nowhere.example/x.html", "http://bad.example/x"];
+  const texts = [...DEMO_JOBS.flatMap((j) => j.lines.map((l) => l.text)), "Should the description be written in English?", "Working on it, nearly there.", "ok", "two\nlines"];
+  const pages = [mock.mockDraft("final"), mock.mockDraft("placeholder"), mock.mockDraft("revised"), mock.mockDraft("final", "cafe"), "https://nowhere.example/x.html", "http://bad.example/x"];
   for (let step = 0; step < 300; step++) {
     const st = await view("stats", []);
     const open = [...seen.values()].filter((c) => c.status === "requested" || c.status === "active").map((c) => c.commission);
@@ -97,7 +100,7 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
       const studio = pick(["S1", "S1", "S2", "S9"]);
       const fee = studio === "S1" ? pick([10n ** 18n / 2n, 10n ** 18n / 2n, 1n]) : pick([10n ** 18n, 10n ** 18n, 1n]);
       mock.setMockPersona(who);
-      await finalOf(await mock.write(calls.requestCommission(studio, pick([DEMO_BRIEF, DEMO_BRIEF, BRIEF_CHIPS[1].value, "short"]), fee)));
+      await finalOf(await mock.write(calls.requestCommission(studio, pick([DEMO_BRIEF, DEMO_BRIEF, BRIEF_CHIPS[1].value, BRIEF_CHIPS[2].value, BRIEF_CHIPS[3].value, OFF_SCRIPT, "short"]), fee)));
       label = `request ${studio}`;
     } else if (roll < 0.45) {
       const a = r() < 0.3 ? await mock.demoAccept(cid) : await mock.demoAct(cid, pick(ACTION_KEYS));

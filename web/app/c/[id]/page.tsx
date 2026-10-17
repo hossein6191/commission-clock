@@ -4,8 +4,8 @@
 // that says what is happening, who the clock runs against, what is needed from you and where the fee
 // is, with the settlement buttons that are open right now; the thread, every judged message stamped
 // with its verdict; the composer for the two parties; the demo maker's next moves on a commission of
-// the demo studio; a waiting panel while the validators judge a press or read a draft page; and the
-// result slip once it settles. Every transaction shows its explorer link from the first second.
+// the demo studio, from the script of the demo job its brief is (or why there are none); a waiting
+// panel while the validators judge a press or read a draft page; and the result slip once it settles. Every transaction shows its explorer link from the first second.
 
 import * as React from "react";
 import Link from "next/link";
@@ -16,7 +16,7 @@ import { StatusPill, TxList, DemoNote } from "@/components/bits";
 import { Brass, BrassLink } from "@/components/button";
 import { LiveClock, clockOf, useCommissionNow } from "@/components/chess-clock";
 import { Composer } from "@/components/composer";
-import { DemoMoves } from "@/components/demo-moves";
+import { DemoMoves, OffScriptNote } from "@/components/demo-moves";
 import { PressCard } from "@/components/press-card";
 import { Placeholder, ReadError } from "@/components/read-state";
 import { SettlementReceipt } from "@/components/settlement";
@@ -30,7 +30,7 @@ import { WaitPanel, waitOf } from "@/components/wait-panel";
 import { WalletGate } from "@/components/wallet-gate";
 import { calls, isMock, pressOutcome, readCommission, readMessages, readStudio, requestDemoAccept, requestDemoAct, studioPath, unsettledWhy } from "@/lib/chain";
 import { acceptSplit, cancelOpensIn, silenceOpensIn, silenceSplit, cancelSplit } from "@/lib/clock";
-import { draftOf, draftOfUrl, isDemoStudio, type DemoAction } from "@/lib/demo-studio";
+import { draftOf, draftOfUrl, isDemoStudio, jobOfBrief, type DemoAction } from "@/lib/demo-studio";
 import { gen, pageName, span } from "@/lib/format";
 import { commissionGuide, demoGuide, judgeGuide, noteGuide, readGuide, sendingGuide, signGuide, type Guide, type Role } from "@/lib/guide";
 import { ACCEPT_WINDOW, PAGE, parseCommissionId, type Side } from "@/lib/rules";
@@ -106,6 +106,9 @@ function Room({ id }: { id: string }) {
   const fee = BigInt(c.feeAtto || "0");
   const t = now || c.now;
   const isDemo = !!demo && !!studio.data && (demo.studio === c.studio || isDemoStudio(studio.data, demo.maker));
+  // The demo maker plays only the four demo briefs, word for word: the brief picks its script.
+  const job = jobOfBrief(c.brief);
+  const demoJob = isDemo && !!job;
   const busy = tx.sending || (!!tx.hash && !tx.final) || demoAsk?.state === "asking";
   const guideInput = {
     role,
@@ -120,7 +123,7 @@ function Room({ id }: { id: string }) {
     clientPaidAtto: c.clientPaidAtto,
     makerLate: c.makerLate,
     cutBpsTotal: c.cutBpsTotal,
-    demo: isDemo,
+    demo: demoJob,
     mock: isMock,
   };
   const stage: "busy" | "late" = wall && tx.at && wall - tx.at > LATE_AFTER ? "late" : "busy";
@@ -148,13 +151,13 @@ function Room({ id }: { id: string }) {
   };
 
   const onDemoAct = (a: DemoAction) => {
-    const call: Call = a.kind === "say" ? calls.say(c.id, a.text) : calls.deliver(c.id, draftOf(a.draft!).file, a.text);
+    const call: Call = a.kind === "say" ? calls.say(c.id, a.text) : calls.deliver(c.id, draftOf(a.draft!, a.job).file, a.text);
     const sending =
       a.kind === "say"
         ? c.holder === "maker"
           ? judgeGuide({ role, commission: c.id, presser: "maker", feeAtto: c.feeAtto, stage: "busy", mock: isMock })
           : noteGuide({ role, commission: c.id, sender: "maker", holder: c.holder, feeAtto: c.feeAtto, mock: isMock })
-        : readGuide({ role, commission: c.id, page: draftOf(a.draft!).file, feeAtto: c.feeAtto, holder: c.holder, stage: "busy", mock: isMock });
+        : readGuide({ role, commission: c.id, page: draftOf(a.draft!, a.job).file, feeAtto: c.feeAtto, holder: c.holder, stage: "busy", mock: isMock });
     void askDemo(a.label, call, `Demo maker: ${a.label.toLowerCase()}`, a.kind === "deliver" || c.holder === "maker", sending, () => requestDemoAct(c.id, a.key));
   };
 
@@ -229,7 +232,7 @@ function Room({ id }: { id: string }) {
         </Brass>,
       );
     }
-    if (role === "client" && isDemo && demo?.online)
+    if (role === "client" && demoJob && demo?.online)
       actions.unshift(
         <Brass key="demo-accept" disabled={busy} onClick={onDemoAccept}>
           Ask the demo maker to accept
@@ -393,6 +396,7 @@ function Room({ id }: { id: string }) {
                 role={party}
                 holder={c.holder}
                 deliveries={c.deliveries}
+                brief={c.brief}
                 busy={busy}
                 onSay={(text, press) =>
                   void run({
@@ -426,16 +430,17 @@ function Room({ id }: { id: string }) {
               />
             </WalletGate>
           )}
-          {isDemo && c.status === "active" && role !== "maker" && demo && (
+          {isDemo && !job && role !== "maker" && (c.status === "requested" || c.status === "active") && <OffScriptNote status={c.status} />}
+          {demoJob && c.status === "active" && role !== "maker" && demo && (
             <>
               {demo.online ? (
-                <DemoMoves holder={c.holder} busy={busy} drafts={demo.drafts} draftsReason={demo.draftsReason} onAct={onDemoAct} />
+                <DemoMoves job={job!} holder={c.holder} busy={busy} drafts={demo.drafts} draftsReason={demo.draftsReason} onAct={onDemoAct} />
               ) : (
                 <DemoNote />
               )}
             </>
           )}
-          {isDemo && c.status === "requested" && !demo?.online && <DemoNote />}
+          {demoJob && c.status === "requested" && !demo?.online && <DemoNote />}
           <section aria-labelledby="sent-title">
             <h2 id="sent-title" className="text-[20px]">
               Sent from this browser

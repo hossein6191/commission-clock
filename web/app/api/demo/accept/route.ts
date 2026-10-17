@@ -1,5 +1,6 @@
-// POST /api/demo/accept {commission}: the demo maker accepts a request made of the demo studio, so its
-// clock starts with the move on the maker. Requests of any other studio are refused. Rate-limited per
+// POST /api/demo/accept {commission}: the demo maker accepts a request made of the demo studio with one
+// of the four demo briefs word for word, so its clock starts with the move on the maker. Requests of
+// any other studio, or with any other brief, are refused. Rate-limited per
 // commission and in total, one signature at a time; answers the transaction hash or why not. Nothing
 // here ever logs or returns the key.
 

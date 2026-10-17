@@ -1,9 +1,10 @@
 // One-click suggestions for every field a visitor types into, so nothing on the site needs typing.
 // Every value here is inside the contract's limits; tests/unit/suggestions.test.mjs checks each one
 // against lib/rules.ts. Each message chip carries what the network should make of it, so a visitor
-// can try every verdict on purpose. All names are fictional.
+// can try every verdict on purpose; on a commission the chips are its demo job's (the mug's for any
+// other brief). All names are fictional.
 
-import { CLIENT_LINES, DEMO_BRIEF, DEMO_TERMS } from "./demo-studio.ts";
+import { DEMO_JOBS, DEMO_TERMS, LATER, jobOf, jobOfBrief, type DemoJob, type JobKey } from "./demo-studio.ts";
 import type { PressVerdict, Side } from "./rules.ts";
 
 const GEN = 10n ** 18n;
@@ -71,70 +72,113 @@ export const CAP_CHIPS: Chip<number>[] = [
   { label: "50%", value: 5000 },
 ];
 
-/** Briefs a client can send with one click. The first is the one the demo maker's drafts answer. */
-export const BRIEF_CHIPS: Chip<string>[] = [
-  { label: "The stoneware mug (the demo drafts)", value: DEMO_BRIEF },
-  {
-    label: "A bakery's welcome email",
-    value: "A 100-word welcome email for new subscribers to a small bakery's newsletter. Friendly, plain English. Mention the Saturday sourdough and how to unsubscribe.",
-  },
-  {
-    label: "A cafe's chalkboard menu",
-    value: "Chalkboard copy for a cafe's autumn menu: six drinks and four cakes, one short line each, no prices. Cheerful but not twee.",
-  },
-];
+/** Briefs a client can send with one click: the four demo jobs, the mug first, each one the demo maker plays word for word. */
+export const BRIEF_CHIPS: Chip<string>[] = DEMO_JOBS.map((j) => ({ label: `${j.title} (demo drafts)`, value: j.brief }));
 
 /** A message chip: the text, and what the network should make of it from the side that holds the move. */
 export type MessageChip = { label: string; text: string; expect: PressVerdict | "noted"; note: string };
 
-const line = (text: string): PressVerdict => CLIENT_LINES.find((l) => l.text === text)!.expect;
+/** One job's chips, by where the move is and who writes. */
+export type JobChips = {
+  /** the client, holding the move after a question: concrete answers, then "I'll get back to you" */
+  answers: MessageChip[];
+  /** the client, holding the move after a delivery: a specific revision, praise, a vague request */
+  reviews: MessageChip[];
+  /** the client while the maker holds the move: noted */
+  notes: MessageChip[];
+  /** a maker of the visitor's own studio, holding the move: a real question, a sham one, a promise */
+  maker: MessageChip[];
+  /** delivery notes */
+  deliveryNotes: string[];
+};
 
-/** What a client can say while it holds the move after a question from the maker. */
-export const CLIENT_ANSWER_CHIPS: MessageChip[] = [
-  { label: "Sea-green", text: "Sea-green, please.", expect: line("Sea-green, please."), note: "a concrete answer: the move goes back to the maker" },
-  { label: "Oatmeal", text: "Oatmeal, please. It is the autumn colour.", expect: line("Oatmeal, please. It is the autumn colour."), note: "a concrete answer: the move goes back to the maker" },
-  { label: "Later", text: "I'll get back to you on that.", expect: line("I'll get back to you on that."), note: "a promise keeps the move, and the clock, with you" },
-];
+/** The verdict the demo build gives one of the job's own client lines. */
+function line(job: DemoJob, text: string): PressVerdict {
+  const l = job.lines.find((x) => x.text === text);
+  if (!l) throw new Error(`no client line "${text}" in the ${job.key} job`);
+  return l.expect;
+}
 
-/** What a client can say while it holds the move after a delivery. */
-export const CLIENT_REVIEW_CHIPS: MessageChip[] = [
-  {
-    label: "Ask for a gift-wrapping line",
-    text: "Please add one line saying it can be gift wrapped at checkout.",
-    expect: line("Please add one line saying it can be gift wrapped at checkout."),
-    note: "a specific revision: the move goes back to the maker",
-  },
-  { label: "Praise it", text: "Looks lovely, thank you.", expect: line("Looks lovely, thank you."), note: "praise keeps the move with you: accept the work instead" },
-  { label: "A vague request", text: "Can you make it pop a bit more?", expect: line("Can you make it pop a bit more?"), note: "not concrete: the network may split, and unclear keeps the move with you" },
-];
+const ANSWER = "a concrete answer: the move goes back to the maker";
+const REVISION = "a specific revision: the move goes back to the maker";
+const PRAISE = "praise keeps the move with you: accept the work instead";
+const VAGUE = "not concrete: the network may split, and unclear keeps the move with you";
+const NEWS: MessageChip = { label: "Ask for news", text: "Any news on the draft?", expect: "noted", note: "noted: the maker's clock keeps running" };
+const THANKS_NOTE = "noted: you do not hold the move, so nobody is asked";
 
-/** What a client can say while the maker holds the move: noted, and the maker's clock keeps running. */
-export const CLIENT_NOTE_CHIPS: MessageChip[] = [
-  { label: "Thank the maker", text: "Thank you for taking this on. The mug goes in our autumn listing.", expect: "noted", note: "noted: you do not hold the move, so nobody is asked" },
-  { label: "Ask for news", text: "Any news on the draft?", expect: "noted", note: "noted: the maker's clock keeps running" },
-];
+function chips(key: JobKey, c: { answers: [string, string][]; revision: [string, string]; praise: string; vague: string; thanks: string }): JobChips {
+  const job = jobOf(key);
+  const say = job.actions.filter((a) => a.kind === "say");
+  const notes = job.actions.filter((a) => a.kind === "deliver");
+  const note = (k: string) => notes.find((a) => a.key === k)!.text;
+  return {
+    answers: [
+      ...c.answers.map(([label, text]) => ({ label, text, expect: line(job, text), note: ANSWER })),
+      { label: "Later", text: LATER, expect: line(job, LATER), note: "a promise keeps the move, and the clock, with you" },
+    ],
+    reviews: [
+      { label: c.revision[0], text: c.revision[1], expect: line(job, c.revision[1]), note: REVISION },
+      { label: "Praise it", text: c.praise, expect: line(job, c.praise), note: PRAISE },
+      { label: "A vague request", text: c.vague, expect: line(job, c.vague), note: VAGUE },
+    ],
+    notes: [{ label: "Thank the maker", text: c.thanks, expect: "noted", note: THANKS_NOTE }, NEWS],
+    maker: [
+      { label: say[0].label, text: say[0].text, expect: say[0].expect as PressVerdict, note: "a real question the brief leaves open" },
+      { label: say[1].label, text: say[1].text, expect: say[1].expect as PressVerdict, note: "the brief already answers it" },
+      { label: "Progress update", text: say[2].text, expect: say[2].expect as PressVerdict, note: "a promise is not material" },
+    ],
+    deliveryNotes: [note("final"), note("outline"), note("revised"), ""],
+  };
+}
 
-/** What a maker of the visitor's own studio can say while it holds the move. */
-export const MAKER_PRESS_CHIPS: MessageChip[] = [
-  {
-    label: "Ask which glaze",
-    text: "Which glaze should the description name? We make this mug in sea-green, oatmeal and charcoal, and the brief does not say which one this listing is for, so I need you to choose before I write it.",
-    expect: "pass",
-    note: "a real question the brief leaves open",
-  },
-  { label: "Ask about English", text: "Should the description be written in English?", expect: "keep", note: "the brief already answers it" },
-  { label: "Progress update", text: "Working on it, nearly there.", expect: "keep", note: "a promise is not material" },
-];
+/** Every demo job's chips. */
+export const JOB_CHIPS: Record<JobKey, JobChips> = {
+  mug: chips("mug", {
+    answers: [
+      ["Sea-green", "Sea-green, please."],
+      ["Oatmeal", "Oatmeal, please. It is the autumn colour."],
+    ],
+    revision: ["Ask for a gift-wrapping line", "Please add one line saying it can be gift wrapped at checkout."],
+    praise: "Looks lovely, thank you.",
+    vague: "Can you make it pop a bit more?",
+    thanks: "Thank you for taking this on. The mug goes in our autumn listing.",
+  }),
+  bakery: chips("bakery", {
+    answers: [["8 am", "At 8 am, and it stays on the shelves until it sells out."]],
+    revision: ["Ask for a free-coffee line", "Please add one line saying new subscribers get a free coffee with their first loaf."],
+    praise: "That reads beautifully, thank you.",
+    vague: "Could it feel a bit more special?",
+    thanks: "Thank you for taking this on. The email goes to our new subscribers next week.",
+  }),
+  cafe: chips("cafe", {
+    answers: [["The prices", "Espresso 2.50, flat white 3.20, hot chocolate 3.40, chai latte 3.40, mint tea 2.80, lemon drizzle 3.00, carrot cake 3.50, brownie 2.90."]],
+    revision: ["Ask for an oat milk line", "Please add a last line saying oat milk is free in any drink."],
+    praise: "Perfect, that will look great on the board.",
+    vague: "Can it be a bit more fun?",
+    thanks: "Thank you for taking this on. The board goes up on Monday.",
+  }),
+  bike: chips("bike", {
+    answers: [["Fifteen years", "Fifteen years. We opened in the spring of 2011."]],
+    revision: ["Ask for a wheelchairs line", "Please add that we fix wheelchairs and prams too."],
+    praise: "Spot on, thank you.",
+    vague: "Could it have a bit more personality?",
+    thanks: "Thank you for taking this on. The new website goes live next month.",
+  }),
+};
 
-/** Delivery notes. */
-export const NOTE_CHIPS: string[] = ["The finished description.", "Here is the outline.", "Revised with a line about gift wrapping.", ""];
+/** The chips for a commission's brief: its demo job's, or the mug's for any other brief. */
+export const chipsFor = (brief: string): JobChips => JOB_CHIPS[(jobOfBrief(brief) ?? DEMO_JOBS[0]).key];
 
-/** The message chips that fit who is writing and the state of the move. */
-export function messageChipsFor(role: Side, holder: string, deliveries: number): MessageChip[] {
+/** What a maker writes while the client holds the move: noted. */
+export const MAKER_NOTE_CHIP: MessageChip = { label: "Check in", text: "Any thoughts on the draft?", expect: "noted", note: "noted: the client holds the move" };
+
+/** The message chips that fit who is writing, the state of the move and the commission's brief. */
+export function messageChipsFor(role: Side, holder: string, deliveries: number, brief = ""): MessageChip[] {
+  const c = chipsFor(brief);
   if (role === "client") {
-    if (holder !== "client") return CLIENT_NOTE_CHIPS;
-    return deliveries > 0 ? [...CLIENT_REVIEW_CHIPS, ...CLIENT_ANSWER_CHIPS] : [...CLIENT_ANSWER_CHIPS, ...CLIENT_REVIEW_CHIPS];
+    if (holder !== "client") return c.notes;
+    return deliveries > 0 ? [...c.reviews, ...c.answers] : [...c.answers, ...c.reviews];
   }
-  if (holder !== "maker") return [{ label: "Check in", text: "Any thoughts on the draft?", expect: "noted", note: "noted: the client holds the move" }];
-  return MAKER_PRESS_CHIPS;
+  if (holder !== "maker") return [MAKER_NOTE_CHIP];
+  return c.maker;
 }

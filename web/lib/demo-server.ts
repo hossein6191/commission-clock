@@ -1,7 +1,8 @@
 // The demo maker, server side only (imported by app/api/demo/*). It holds a throwaway Studio test key
 // from the DEMO_MAKER_KEY environment variable and signs exactly three kinds of call with it, on
-// commissions of the demo studio only: accept() on a request, and say() or deliver() with one of the
-// FIXED actions in lib/demo-studio.ts. Nothing a visitor types is ever signed. The key is never
+// commissions of the demo studio whose brief is one of the four demo jobs word for word: accept() on a
+// request, and say() or deliver() with one of that job's FIXED actions in lib/demo-studio.ts. The
+// brief only picks the script; nothing a visitor types is ever signed. The key is never
 // logged, never returned and never written anywhere; an answer names the maker's public address at
 // most.
 
@@ -12,7 +13,7 @@ import { balanceOf, contractAddress, isMock, readCommission, readStudiosOf, stud
 import { REPO_URL, draftsCommit } from "./config";
 import { cleanKey, keyProblem } from "./demo-key";
 import { DEMO_LIMITS, createLimiter } from "./demo-limit";
-import { DEMO_STUDIO_NAME, actionOf, demoActProblem, draftOf, draftUrl, repoOf, type DemoAction } from "./demo-studio";
+import { DEMO_STUDIO_NAME, demoActProblem, demoActionFor, draftOf, draftUrl, isActionKey, repoOf, type DemoAction } from "./demo-studio";
 import { idNumber } from "./rules";
 import { FINAL_STATUSES, rpc, sleep, statusName, type RawTx } from "./rpc";
 import type { DemoStatus } from "./types";
@@ -137,10 +138,12 @@ function serial<T>(job: () => Promise<T>): Promise<T> {
 
 export type ServerAnswer = { status: number; body: { ok: true; hash: string } | { ok: false; reason: string; retryAfter?: number } };
 
-/** The demo maker accepts a request (`"accept"`) or does one action of its fixed script, on a commission of the demo studio. */
+/**
+ * The demo maker accepts a request (`"accept"`) or does one action of its fixed script, on a commission
+ * of the demo studio: the script is the job whose brief the commission carries, word for word.
+ */
 export async function sendDemo(commission: string, what: "accept" | string): Promise<ServerAnswer> {
-  const action: "accept" | DemoAction | null = what === "accept" ? "accept" : actionOf(what);
-  if (!action) return { status: 400, body: { ok: false, reason: "the demo maker does only what its buttons say" } };
+  if (what !== "accept" && !isActionKey(what)) return { status: 400, body: { ok: false, reason: "the demo maker does only what its buttons say" } };
   const s = await demoStatusNow();
   if (!s.online) return { status: 503, body: { ok: false, reason: "the demo maker is offline: " + s.reason } };
   const turn = limiter.attempt(commission, Date.now());
@@ -152,15 +155,17 @@ export async function sendDemo(commission: string, what: "accept" | string): Pro
   } catch {
     return { status: 502, body: { ok: false, reason: "could not read the commission from Studio; try again in a minute" } };
   }
-  const problem = demoActProblem(row ? { id: row.id, studio: row.studio, status: row.status } : null, s.studio, action, s.drafts);
+  const problem = demoActProblem(row ? { id: row.id, studio: row.studio, status: row.status, brief: row.brief } : null, s.studio, what, s.drafts);
   if (problem) return { status: row ? 409 : 404, body: { ok: false, reason: problem } };
+  // The brief picks which job's fixed move this key names; the move's own words are what is signed.
+  const action: "accept" | DemoAction = what === "accept" ? "accept" : demoActionFor(row!.brief, what)!;
   const a = demoAccount()!;
   const call =
     action === "accept"
       ? { functionName: "accept", args: [commission] }
       : action.kind === "say"
         ? { functionName: "say", args: [commission, action.text] }
-        : { functionName: "deliver", args: [commission, draftUrl(repoOf(REPO_URL), draftsCommit(), draftOf(action.draft!).file), action.text] };
+        : { functionName: "deliver", args: [commission, draftUrl(repoOf(REPO_URL), draftsCommit(), draftOf(action.draft!, action.job).file), action.text] };
   try {
     const hash = await serial(async () => {
       const client = createClient({ chain: studio, account: a });
