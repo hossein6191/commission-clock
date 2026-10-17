@@ -11,7 +11,7 @@ export const DEMO_CONTRACT: string = "0xA1D5A82406a34ee95bc07e4258116dCbE40a9385
  * serves them: every validator fetches the same bytes. Filled in once the repository is pushed;
  * NEXT_PUBLIC_DRAFTS_COMMIT overrides it. While both are empty the demo maker can talk but not deliver.
  */
-export const DRAFTS_COMMIT: string = "cc909440cc83c345ec931b82b514b7018639f8f6";
+export const DRAFTS_COMMIT: string = "86e31897ecb10e8bf479acd5bfd954e59deb344b";
 
 export const SITE_NAME = "Commission Clock";
 export const SITE_TAGLINE = "The clock runs only against the side that holds the move.";
