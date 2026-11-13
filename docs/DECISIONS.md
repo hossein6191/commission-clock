@@ -40,7 +40,8 @@ charged only after `TURN_GRACE` = 300 seconds, a delay of the kind chess clocks
 use for the same reason. A turn a side takes itself, and the maker's first turn
 at acceptance, are charged from the side's own transaction: it chose the
 moment, and a free start there would let a maker reset its clock with a pass
-and a take.
+and a take. A stage the client accepts hands the next turn to the maker with
+the same grace: the client chose the moment, not the maker.
 
 **A turn never moves back.** Each transaction carries its own clock, and one
 can read earlier than the turn it ends. Handing the move over then keeps the
@@ -141,10 +142,12 @@ methods to hold them to that.
 ## 5. The money is already there, and leaves through one door
 
 **The fee is held from the request.** Every settlement pays out exactly the
-held fee: the maker gets what it is owed and the client gets the rest. Nothing
-is left behind and nothing is paid twice. `_settle` is the only place that
-sends money from a commission, and the static test lists every transfer in
-the contract.
+held fee, or on a staged commission the unpaid remainder: the maker gets what
+it is owed and the client gets the rest. Nothing is left behind and nothing is
+paid twice. `_pay`, called only by `_settle` and by a stage payment, is the
+only place that sends money from a commission; `withdraw` is the only place
+that sends credit, and only to its owner. The static test lists every transfer
+in the contract.
 
 **The cut is per started step and capped.** A minute over is a step, so
 "I was only a few seconds late" is not a way round it. The cap is the
@@ -183,7 +186,110 @@ capped cut. Without a delivery the whole fee goes back.
 everything without raising, and every refusal sends the value back in the same
 transaction with `{"ok": false}`. It never runs the model.
 
-## 6. Every party has a way out
+## 6. Stages: paid as the work arrives, never twice
+
+**Why stages.** One delivery at the end is the whole fee on one judgment. On a
+piece that takes weeks, the maker carries all the risk until the last page and
+the client has nothing to stop on before it. Named stages with shares of the
+fee let the client pay for an outline it has seen, and let the maker be paid
+for it, without trusting the other with the rest. The stages are the studio's
+own words, fixed when it opens and copied onto each commission at request time,
+so the client pays for exactly the stages it read; at most four, so every walk
+over them is bounded by a constant.
+
+**Each delivery is judged against its stage.** A finished page is not an
+outline, and an outline is not the finished page. The current stage reaches
+the prompt in its own `STAGE` block, built from the contract's numbers and the
+maker's words, fenced like every other party text. A one-stage studio is asked
+exactly what version 1 asked, with no `STAGE` block, so nothing that was
+measured on chain for version 1 changes.
+
+**The cut on a stage is taken on that stage's share, at the cut reached when it
+is paid.** The formula:
+
+```
+share_k   = fee * share_bps_k // 10000        (the last stage takes fee - the others)
+cut_bps   = min(max_cut_bps, ceil(max(0, maker live use - maker_seconds) / step_seconds) * cut_bps)
+cut_k     = share_k * cut_bps // 10000         (cut_bps as it stands when stage k is accepted)
+to maker  = share_k - cut_k;  to client = cut_k
+```
+
+The maker's allowance is one budget for the whole commission, so lateness
+carries from stage to stage and never resets. But each share is cut once, when
+it is paid, and never again: a stage paid on time keeps its whole share even if
+the maker is late later. The alternative, recharging earlier shares at the
+higher cut out of a later payment, would make a paid stage provisional, which
+is the thing stages exist to avoid. On one stage the formula is version 1's
+`fee - fee * cut_bps // 10000`.
+
+**Settlements touch the remainder only.** `claim_silence` and `cancel_late`
+settle what is still held. A silent client after a stage's delivery pays that
+stage as accepted and a kill fee on the stages after it; a silent client
+before one pays the kill fee on the remainder; a capped maker's cancel returns
+the remainder, less the current stage at the cap if its page stands. Paid
+stages are never clawed back. The settlement loop closes at most four stage
+rows, so every settlement stays O(1).
+
+## 7. One bonded appeal per verdict
+
+**Why an appeal at all.** A single round can be wrong in a way the parties can
+see and the validators could not: a question the thread had already answered
+that the window left out, a page the reader skimmed. Version 1's only answer to
+a verdict that went against you was to carry on, rephrase or take the move,
+which costs seconds but never corrects the record or the move. An appeal gives
+the losing side one argued second reading.
+
+**Why it is not "asking until it suits".** Rule 8 forbids a route out that is
+the same question asked again until the answer changes. The appeal is built so
+it is not: it is available once per verdict, only to the side the verdict went
+against, only within 600 seconds, never of an appeal's own verdict, and only
+on the latest judged press or delivery. It costs a 0.1 GEN bond that goes to the
+other side when the verdict stands, so a side that appeals everything pays the
+side it appeals against. And it is not the same question: it adds the
+appellant's argument and, for balance, the other side's last message, as
+fenced and labelled party argument the prompt tells the reader to weigh only
+where the other blocks bear it out. It never tells the reader what the first
+answer was. The comparison stays exact, both orders stay inside one block, and
+a disagreement still lands on `unclear`; an appeal that does not settle stores
+nothing, exactly like a first round.
+
+**The same page, or none.** A delivery appeal reads the page again and judges
+it only if it still gives the fingerprint that was judged. A page that changed,
+went away or reads as nothing is agreed as `changed` without asking any model,
+and that counts against the maker, who controls the page: a delivered verdict
+becomes missing, a missing one stands. Otherwise a maker could edit a page
+after a verdict and appeal into a different judgment of different bytes.
+
+**What a different verdict changes.** The message keeps both verdicts. The
+move goes where the new verdict puts it, but only when nothing moved the clock
+or was judged since: otherwise the parties have moved on and rewinding the
+move would undo choices made after it, so only the record and the stage's
+standing delivery change. When the move does change, the running turn is
+charged only up to the verdict, so the seconds the appeal took go to nobody,
+and the new holder's turn starts with the usual grace. Money already paid
+never moves.
+
+**The other side waits, briefly and only on its own verdicts.** A settlement
+could end a commission before the losing side had a chance to appeal, so
+`claim_silence` waits while the client may still appeal a verdict on one of
+the maker's messages, and `cancel_late` while the maker may appeal one of the
+client's. Only the settler's own messages count: a side cannot keep a
+settlement away by making new verdicts against itself every nine minutes. The
+wait is never more than 600 seconds after the settler's own last judged
+message. The maker cannot deliver over a delivered page the client may still
+appeal until the client has written since (a revision request, say), so the
+client's appeal cannot be overwritten either; taking the move first does not
+lift it. A press that may be appealed is replaced only by a later press, and
+the side a press verdict favoured can press only after taking the move, which
+gives the appellant the move its appeal asked about. `accept_stage` never waits: it
+is the client's own call on a verdict in its favour or against it.
+
+**Payable calls never ask.** `deposit` adds credit and refuses only a deposit
+of nothing, returning it with `ok: false`; it never runs the model and never
+raises. The bond is taken from credit inside the appeal, so the appeal itself
+takes no value and can raise its refusals before any round.
+
+## 8. Every party has a way out
 
 | refused | the way out |
 |---|---|
@@ -200,6 +306,11 @@ transaction with `{"ok": false}`. It never runs the model.
 | `cancel_late` too early, or inside the notice | the refusal says how many seconds are left |
 | a client that will not answer | `claim_silence`: settled, or the kill fee |
 | a maker that will not move | `cancel_late` at the cap |
+| `accept_stage` before the stage's delivery | the maker delivers the stage's page |
+| an appeal refused for its bond | `deposit`, then appeal |
+| an appeal refused for its window, or a lost appeal | the ordinary routes: rephrase, deliver again, take the move |
+| `claim_silence` or `cancel_late` waiting on the other side's appeal | the refusal names the deadline; at most 600 s |
+| a maker refused a redelivery over an appealable page | after the window, or at once once the client has written |
 
 Each is walked as a journey in `TestRoutesOut`, and the random journeys end by
 bringing every commission still running to a close through a party's own call.
@@ -215,9 +326,17 @@ turn and for a maker handed a revision past its cap; the accept window at its
 boundary; the question being answered staying in the thread after six notes;
 every settlement and its exact split, including the per-started-step rounding
 at each boundary, the cap, an odd fee, the kill fee net of the cut, and a
-cancel after a delivery; money and clock invariants after every step
-of sixteen seeded random journeys that must reach every status and every
-verdict; a failed fetch, a page that reads as nothing and a failed model call
+cancel after a delivery; stages declared, refused and copied with the odd atto
+on the last; each stage cut on its own share at the cut then, never again; the
+remainder-only silence claim and cancel; an appeal upheld (bond to the other
+side) and overturned (the move, the seconds since given to nobody, the stage's
+delivery), the changed page read against the maker, the window at its
+boundary, once only, the bond, a failed appeal round storing nothing, an
+appeal after the clock moved on changing only the record, and the waits that
+protect an appeal without letting the appellant extend them; money, credit,
+stage and clock invariants after every step of twenty-four seeded random
+journeys that must reach every status, every verdict and every appeal
+outcome; a failed fetch, a page that reads as nothing and a failed model call
 each storing nothing; an error status (404, 410, 500, 503) storing nothing
 while a redirect is read; the raw cut before the spacing is collapsed;
 validators whose pages differ disagreeing; whitespace
@@ -226,8 +345,11 @@ landing on `unclear`; a message from the side without the move never reaching
 the network; every demo draft coming to its verdict with a scripted reader;
 static rules over the parsed source (sender gates, the payable door, loops,
 the prompt boundary, the closures, the comparison, no float, transfers, the
-clock's single mover); and 263 mutants, none surviving.
+clock's single mover, the appeal's party argument reaching the prompt only as
+fenced blocks); and 378 mutants, none surviving.
 
 Not verified offline: how real models on Studio read the demo messages and
-drafts. The scripted reader in the tests is a stand-in. The on-chain run is the
-evidence for that, and its record goes in the README once it has run.
+drafts, the staged pages and an appeal's argument. The scripted reader in the tests is a stand-in. The on-chain run is the
+evidence for that, and its record goes in the README once it has run. The
+recorded run is of version 1; version 2's smoke has been checked for syntax
+only and has not run on chain.

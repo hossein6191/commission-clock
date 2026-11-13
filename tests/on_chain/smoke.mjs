@@ -1,7 +1,7 @@
 /* Commission Clock against GenLayer Studio (chain 61999), with throwaway accounts. Deploys its own copy.
  *
  *   npm ci                                                   # genlayer-js 1.1.8 and viem 2.56.8, pinned by package-lock.json
- *   COMMIT=<sha> node tests/on_chain/smoke.mjs               # the whole run, about fifty minutes
+ *   COMMIT=<sha> node tests/on_chain/smoke.mjs               # the whole run, about eighty minutes
  *   COMMIT=<sha> RESUME=1 node tests/on_chain/smoke.mjs      # continue a run that was cut off, from the saved state
  *   STATE=/some/dir/run.json ...                             # the state file: keys, contract address, every step made
  *   FRESH=1 ...                                              # start over even though a saved run exists
@@ -39,9 +39,18 @@
  *      settles as accepted; once MAKER's cut on C3 has reached the cap, CLIENT cancels it and gets the 1 GEN back.
  *      A turn handed over by a judged message or a delivery is not charged for its first 300 seconds, and neither
  *      settlement opens before the current turn has been charged 300 seconds; the waits read both from the view.
+ *   E  a commission paid in three stages, on S2 (the same fee and cut; 3600 seconds for the maker, 1800 for the
+ *      client): MAKER deposits two appeal bonds of 0.1 GEN as credit; on C4 it delivers mug-placeholder.html for
+ *      the Outline stage (missing) and appeals with its reason: the validators read the same page again and come
+ *      to missing again, so the bond goes to CLIENT's credit. MAKER delivers mug-outline.html (delivered) and
+ *      CLIENT accepts stage 1: 0.2 GEN less the cut reached, paid at once. MAKER asks whether to write in
+ *      English (keep) and appeals that too: keep again, the second bond to CLIENT. mug-first-draft.html and
+ *      mug-final.html are delivered and accepted in turn; the last acceptance settles C4. CLIENT withdraws the
+ *      two bonds; MAKER, with no credit left, is refused a withdrawal. Each appeal is sent only while the
+ *      chain's clock shows at least two minutes of its 600-second window left; otherwise it is reported as SKIP.
  *   D  the deployed code is read back and compared with contracts/commission_clock.py byte for byte; the views
  *      are checked against what the run did; the contract holds nothing; every account ends where the money
- *      says: MAKER up exactly what CLIENT is down, STRANGER whole.
+ *      says: MAKER up exactly what CLIENT is down, bonds included, STRANGER whole.
  *
  * Every refusal is a signed transaction. Balances are read before and after every step that moves money.
  * Transactions are polled with eth_getTransactionByHash, never with views (gen_call is limited to 30 a minute
@@ -104,7 +113,8 @@ if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(REPO)) {
   process.exit(2);
 }
 const RAW = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/drafts/`;
-const PAGE = { final: RAW + "mug-final.html", placeholder: RAW + "mug-placeholder.html" };
+const PAGE = { final: RAW + "mug-final.html", placeholder: RAW + "mug-placeholder.html", outline: RAW + "mug-outline.html",
+  firstDraft: RAW + "mug-first-draft.html" };
 const LOCAL = {};
 for (const [name, address] of Object.entries(PAGE)) {
   LOCAL[name] = readFileSync(new URL("../../drafts/" + address.slice(RAW.length), import.meta.url), "utf8");
@@ -309,6 +319,14 @@ const LATER = "I'll get back to you on that.";
 const SEA_GREEN = "Sea-green, please.";
 const ENGLISH_Q = "Should the description be written in English?";
 const UPDATE = "Working on it, nearly there.";
+// the staged commission of phase E, and its two appeals
+const STAGES = "Outline=2000=a list of the points the description will make|First draft=3000=the description in full sentences, care notes may still be missing|Final=5000=the finished description";
+const STAGED_NAME = "Fernhill Pottery, in stages";
+const STAGED = { maker: 3600, client: 1800 };
+const APPEAL_WINDOW = 600, APPEAL_BOND = 100000000000000000n;
+const APPEAL_MARGIN = 120;
+const MISSING_REASON = "The placeholder is the first stage we agreed on.";
+const KEEP_REASON = "The brief does not say which language to write in.";
 const QUESTION_HAND = "After this new message from the {holder}, is the {holder} now waiting for something only the {other} can give (an answer, a decision, material, or a review) that this message actually asks for or hands over? Answer yes, no or unclear.";
 const QUESTION_THERE = "Does this page contain the finished piece the brief asks for, the actual work complete enough for the client to review, rather than a placeholder, an outline, a promise, a fragment or something else? Answer yes, no or unclear.";
 // the split the contract must make from the seconds it stored
@@ -322,6 +340,13 @@ const splitOk = (j) => {
   const s = split(j);
   return j && Number(j.maker_late) === s.late && Number(j.cut_bps) === s.bps && j.to_maker === String(s.toMaker) && j.to_client === String(s.toClient);
 };
+// a stage is cut on its own share only, at the cut the maker's stored seconds come to when it is paid
+const stageOk = (j, share) => {
+  const late = Math.max(0, Number(j?.maker_used) - STAGED.maker);
+  const bps = Math.min(CAP, Math.ceil(late / STEP) * CUT);
+  const cut = share * BigInt(bps) / 10000n;
+  return !!j && Number(j.cut_bps) === bps && j.to_maker === String(share - cut) && j.to_client === String(cut);
+};
 
 await fundOnce("maker", 10); await fundOnce("client", 10); await fundOnce("stranger", 5);
 if (!st.start) { st.start = {}; for (const k of Object.keys(ROLES)) st.start[k] = String(await balance(acct[k].address)); st.started = new Date().toISOString(); save(); }
@@ -332,7 +357,7 @@ console.log(`\n[${stamp()}] ---- phase A: deploy, the studio, three commissions,
 st.contract = st.contract || await deploy("deploy", "maker", "../../contracts/commission_clock.py");
 save();
 console.log(`      Commission Clock at ${st.contract}`);
-const open = await call("openStudio", "maker", "open_studio", [STUDIO_NAME, ABOUT, String(FEE), MAKER_SECONDS, CLIENT_SECONDS, STEP, CUT, CAP]);
+const open = await call("openStudio", "maker", "open_studio", [STUDIO_NAME, ABOUT, String(FEE), MAKER_SECONDS, CLIENT_SECONDS, STEP, CUT, CAP, ""]);
 ok("MAKER opens S1, Fernhill Pottery: 1 GEN, 900 s for the maker, 420 s for the client, 10% per started minute late up to 50%", open.j?.ok === true && open.j?.studio === "S1" && open.j?.fee === String(FEE) && open.j?.max_cut_bps === CAP, `${votes(open)}  ${open.msg.slice(0, 120)}`);
 const sid = open.j?.studio || "S1";
 const sc = await call("closeStranger", "stranger", "close_studio", [sid]);
@@ -415,6 +440,68 @@ console.log(`\n[${stamp()}] ---- phase C: the clocks run out`);
   ok(`a second cancel of ${cids.c3} is refused`, refused(again, cids.c3 + " is cancelled_late; a commission is cancelled while it is active"), `${votes(again)}  ${again.msg.slice(0, 110)}`);
 }
 
+// ================================================================ phase E
+console.log(`\n[${stamp()}] ---- phase E: a commission in three stages, two appeals, three payments`);
+// An appeal is a check only while its window is plainly open: the round that made the verdict and its wait run on
+// the window's clock, so read the chain's clock first and send it only with APPEAL_MARGIN seconds to spare.
+const appealInWindow = async (id, who, cid, reason, slot) => {
+  if (!st.steps[id] && !st.skipped.includes(id)) {
+    const r = await read("commission", [cid]);
+    const v = r && !r.error ? r[slot] : null;
+    const left = v && v.open ? Number(v.deadline) - Number(r.now) : 0;
+    if (left < APPEAL_MARGIN) { st.skipped.push(id); st.views[id + "Left"] = { at: stamp(), left, out: v }; save(); }
+  }
+  if (st.skipped.includes(id)) {
+    skip(`${who.toUpperCase()}'s appeal on ${cid}`, `${st.views[id + "Left"]?.left}s of its ${APPEAL_WINDOW}s window were left when it could be sent, under the ${APPEAL_MARGIN}s this check needs`);
+    return null;
+  }
+  return await call(id, who, "appeal", [cid, reason]);
+};
+const SHARES = [FEE * 2000n / 10000n, FEE * 3000n / 10000n, FEE - FEE * 2000n / 10000n - FEE * 3000n / 10000n];
+const paidOut = (j) => ({ maker: BigInt(j?.to_maker || 0), client: BigInt(j?.to_client || 0) });
+const openS = await call("openStaged", "maker", "open_studio", [STAGED_NAME, ABOUT, String(FEE), STAGED.maker, STAGED.client, STEP, CUT, CAP, STAGES]);
+ok("MAKER opens S2 in three stages: Outline 20%, First draft 30%, Final 50% of 1 GEN", openS.j?.ok === true && openS.j?.studio === "S2" && (openS.j?.stages || []).map((x) => x.share_bps).join() === "2000,3000,5000", `${votes(openS)}  ${JSON.stringify(openS.j?.stages?.map((x) => x.name))}`);
+const s2 = openS.j?.studio || "S2";
+const rq4 = await call("request_c4", "client", "request_commission", [s2, BRIEF], { value: FEE, watch: ["client"], expect: { client: -FEE } });
+ok(`CLIENT commissions S2: ${rq4.j?.commission}, 1 GEN held`, rq4.j?.ok === true && moved(rq4, "client", -FEE), `${votes(rq4)}`);
+const c4 = rq4.j?.commission || "C4";
+const a4 = await call("accept_c4", "maker", "accept", [c4]);
+ok(`MAKER accepts ${c4}: stage 1 of 3, the move on the maker`, a4.j?.status === "active" && a4.j?.holder === "maker", `${votes(a4)}`);
+const dep = await call("depositMaker", "maker", "deposit", [], { value: 2n * APPEAL_BOND, watch: ["maker"], expect: { maker: -2n * APPEAL_BOND } });
+ok("MAKER deposits two appeal bonds as credit; no model is asked", dep.j?.ok === true && dep.j?.credit === String(2n * APPEAL_BOND) && moved(dep, "maker", -2n * APPEAL_BOND), `${votes(dep)}  ${dep.msg.slice(0, 100)}`);
+const dPh = await call("deliverStagePlaceholder", "maker", "deliver", [c4, PAGE.placeholder, "Stage one."]);
+ok("MAKER delivers mug-placeholder.html for the Outline stage: missing, the move stays with MAKER", dPh.j?.verdict === "missing" && dPh.j?.holder === "maker" && dPh.j?.stage === 1, `${votes(dPh)}  ${JSON.stringify({ verdict: dPh.j?.verdict, fp: dPh.j?.fp })}`);
+const ap1 = await appealInWindow("appealMissing", "maker", c4, MISSING_REASON, "last_delivery");
+if (ap1) ok("MAKER appeals with its reason: the validators read the same page again and come to missing again; the bond goes to CLIENT's credit", ap1.j?.ok === true && ap1.j?.kind === "deliver" && ap1.j?.appeal === "missing" && ap1.j?.verdict === "missing" && ap1.j?.overturned === false && ap1.j?.bond === "to the client" && ap1.j?.credit === String(APPEAL_BOND), `${votes(ap1)}  ${JSON.stringify({ appeal: ap1.j?.appeal, verdict: ap1.j?.verdict, bond: ap1.j?.bond })}`);
+if (ap1) {
+  const again = await call("appealAgain", "maker", "appeal", [c4, MISSING_REASON]);
+  ok("a second appeal of the same verdict is refused: an appeal is final", refused(again, "was appealed once already"), `${votes(again)}  ${again.msg.slice(0, 120)}`);
+}
+const dOut = await call("deliverOutline", "maker", "deliver", [c4, PAGE.outline, "The outline."]);
+ok("MAKER delivers mug-outline.html: delivered for stage 1, the move to CLIENT", dOut.j?.verdict === "delivered" && dOut.j?.holder === "client" && dOut.j?.stage === 1, `${votes(dOut)}  ${JSON.stringify({ verdict: dOut.j?.verdict, fp: dOut.j?.fp })}`);
+const as1 = await call("acceptStage1", "client", "accept_stage", [c4], { watch: ["maker", "client"], expect: paidOut });
+ok(`CLIENT accepts stage 1: its 0.2 GEN is paid at once, less the cut the maker's ${as1.j?.maker_used} stored seconds come to`, as1.j?.accepted_stage === 1 && as1.j?.stage === 2 && as1.j?.holder === "maker" && stageOk(as1.j, SHARES[0]) && moved(as1, "maker", BigInt(as1.j?.to_maker || -1)), `${votes(as1)}  ${JSON.stringify({ to_maker: as1.j?.to_maker, to_client: as1.j?.to_client, cut_bps: as1.j?.cut_bps })}`);
+const sayE = await call("sayEnglishStaged", "maker", "say", [c4, ENGLISH_Q]);
+ok("MAKER asks whether to write in English, which the brief already says: keep", sayE.j?.verdict === "keep" && sayE.j?.holder === "maker", `${votes(sayE)}`);
+const ap2 = await appealInWindow("appealKeep", "maker", c4, KEEP_REASON, "last_press");
+if (ap2) ok("MAKER appeals the keep: the four askings again with its reason and CLIENT's last message, keep again; the second bond goes to CLIENT", ap2.j?.ok === true && ap2.j?.kind === "say" && ap2.j?.verdict === "keep" && ap2.j?.overturned === false && ap2.j?.holder === "maker", `${votes(ap2)}  ${JSON.stringify({ appeal: ap2.j?.appeal, bond: ap2.j?.bond, credit: ap2.j?.credit })}`);
+const dDr = await call("deliverFirstDraft", "maker", "deliver", [c4, PAGE.firstDraft, "The first draft."]);
+ok("MAKER delivers mug-first-draft.html: delivered for stage 2", dDr.j?.verdict === "delivered" && dDr.j?.holder === "client" && dDr.j?.stage === 2, `${votes(dDr)}`);
+const as2 = await call("acceptStage2", "client", "accept_stage", [c4], { watch: ["maker", "client"], expect: paidOut });
+ok("CLIENT accepts stage 2: its 0.3 GEN, cut on its own share only", as2.j?.accepted_stage === 2 && as2.j?.stage === 3 && stageOk(as2.j, SHARES[1]), `${votes(as2)}  ${JSON.stringify({ to_maker: as2.j?.to_maker, cut_bps: as2.j?.cut_bps })}`);
+const dFi = await call("deliverStageFinal", "maker", "deliver", [c4, PAGE.final, "The finished description."]);
+ok("MAKER delivers mug-final.html: delivered for stage 3", dFi.j?.verdict === "delivered" && dFi.j?.holder === "client" && dFi.j?.stage === 3, `${votes(dFi)}`);
+const as3 = await call("acceptStage3", "client", "accept_stage", [c4], { watch: ["maker", "client"], expect: paidOut });
+ok(`CLIENT accepts the last stage: ${c4} settles as accepted, and the three stages add up to the fee`, as3.j?.status === "accepted" && stageOk(as3.j, SHARES[2]) && BigInt(as3.j?.maker_paid || 0) + BigInt(as3.j?.client_paid || 0) === FEE, `${votes(as3)}  ${JSON.stringify({ to_maker: as3.j?.to_maker, maker_paid: as3.j?.maker_paid, client_paid: as3.j?.client_paid })}`);
+const lost = (ap1 && ap1.j?.overturned === false ? 1n : 0n) + (ap2 && ap2.j?.overturned === false ? 1n : 0n);
+const wdC = await call("withdrawClient", "client", "withdraw", [String(lost * APPEAL_BOND || 1n)], { watch: ["client"], expect: { client: lost * APPEAL_BOND } });
+if (lost > 0n) ok(`CLIENT withdraws the ${Number(lost)} bond${lost > 1n ? "s" : ""} the lost appeals moved to its credit`, wdC.j?.ok === true && wdC.j?.credit === "0" && moved(wdC, "client", lost * APPEAL_BOND), `${votes(wdC)}  ${wdC.msg.slice(0, 100)}`);
+else ok("CLIENT has no credit to withdraw", refused(wdC, "a withdrawal is a whole number of atto"), `${votes(wdC)}`);
+const left = 2n * APPEAL_BOND - lost * APPEAL_BOND;
+const wdM = await call("withdrawMaker", "maker", "withdraw", [String(left || 1n)], { watch: ["maker"], expect: { maker: left } });
+if (left > 0n) ok("MAKER withdraws the credit no appeal spent", wdM.j?.ok === true && moved(wdM, "maker", left), `${votes(wdM)}`);
+else ok("MAKER, its credit spent on two lost appeals, is refused a withdrawal", refused(wdM, "from 1 to the credit held, 0") && moved(wdM, "maker", 0n), `${votes(wdM)}  ${wdM.msg.slice(0, 120)}`);
+
 // ================================================================ phase D
 console.log(`\n[${stamp()}] ---- phase D: the code read back, the views, the balances`);
 {
@@ -431,19 +518,28 @@ console.log(`\n[${stamp()}] ---- phase D: the code read back, the views, the bal
   const s1 = await seen("studio", "studio", [sid]);
   const rec = s1.record || {};
   ok(`studio(${sid}) carries its public record: 3 commissions, 2 finished, 1 cancelled late, 5 presses, 3 deliveries`, rec.commissions === 3 && rec.on_time + rec.late === 2 && rec.cancelled_late === 1 && rec.presses === 5 && rec.passed === 2 && rec.kept === 3 && rec.deliveries === 3 && rec.delivered === 2 && rec.missing === 1, JSON.stringify(rec));
+  const ran = (ap1 ? 1 : 0) + (ap2 ? 1 : 0);
+  const row4 = await seen("commissionStaged", "commission", [c4]);
+  ok(`commission(${c4}) shows its three stages paid, the last press and delivery with their appeals`, row4.status === "accepted" && (row4.stages || []).map((x) => x.status).join() === "accepted,accepted,accepted" && row4.held === "0" && row4.appeals === ran && row4.last_delivery?.verdict === "delivered" && (!ap2 || row4.last_press?.appeal === "keep"), JSON.stringify({ stages: row4.stages?.map((x) => [x.name, x.released, x.cut_bps]), last_press: row4.last_press }));
+  const thread4 = await seen("threadStaged", "messages_of", [c4, 0, 20]);
+  const v4 = (thread4.rows || []).map((r) => r.verdict + (r.appeal ? "/" + r.appeal : ""));
+  ok(`messages_of(${c4}) keeps each appeal on the message it judged`, JSON.stringify(v4) === JSON.stringify([ap1 ? "missing/missing" : "missing", "delivered", "accepted", ap2 ? "keep/keep" : "keep", "delivered", "accepted", "delivered"]) && (!ap1 || thread4.rows?.[0]?.appeal_reason === MISSING_REASON), JSON.stringify(v4));
+  const rec2 = (await seen("studioStaged", "studio", [s2])).record || {};
+  ok(`studio(${s2}) records the stages released and the appeals`, rec2.stages_released === 2 && rec2.appeals === ran && rec2.overturned === 0 && rec2.delivered === 3 && rec2.missing === 1, JSON.stringify(rec2));
   const mine = await seen("commissionsOfClient", "commissions_of", [st.accounts.client, 0, 20]);
   ok("commissions_of(CLIENT) lists the three commissions as client, and finds the address in any letter case", mine.total === 3 && (mine.rows || []).every((r) => r.role === "client"), JSON.stringify({ total: mine.total }));
   const stats = await seen("stats", "stats", []);
-  ok("stats(): nothing held, one noted message, one refused payment returned", stats.held === "0" && stats.accepted === 1 && stats.accepted_by_silence === 1 && stats.cancelled_late === 1 && stats.noted === 1 && stats.refused_payments === 1 && stats.returned === String(FEE), JSON.stringify(stats));
+  ok("stats(): nothing held, no credit left, one noted message, one refused payment returned", stats.held === "0" && stats.credit === "0" && stats.accepted === 2 && stats.accepted_by_silence === 1 && stats.cancelled_late === 1 && stats.noted === 1 && stats.refused_payments === 1 && stats.returned === String(FEE) && stats.appeals === ran && stats.upheld === ran && stats.stages_released === 2, JSON.stringify(stats));
   const rules = await seen("rules", "rules", []);
-  ok("rules() publishes the questions word for word, the comparison and the combine table", rules.press?.askings?.[0] === "1, blocks BRIEF, THREAD, MESSAGE: " + QUESTION_HAND && rules.delivery?.askings?.[0] === "1, blocks BRIEF then PAGE: " + QUESTION_THERE && String(rules.compared).includes("exact equality") && rules.press?.combine?.pass === "HAND yes in both orders and CARRY no in both orders", "");
+  ok("rules() publishes the questions word for word, the comparison, the combine table and the appeal", rules.press?.askings?.[0] === "1, blocks BRIEF, THREAD, MESSAGE: " + QUESTION_HAND && rules.delivery?.askings?.[0] === "1, blocks BRIEF then PAGE: " + QUESTION_THERE && String(rules.compared).includes("exact equality") && rules.press?.combine?.pass === "HAND yes in both orders and CARRY no in both orders" && rules.appeal?.window_seconds === APPEAL_WINDOW && rules.appeal?.bond_atto === String(APPEAL_BOND), "");
   ok("the contract's own balance is zero", (await balance(st.contract)) === 0n, String(await balance(st.contract)));
   st.end = {}; for (const k of Object.keys(ROLES)) st.end[k] = String(await balance(acct[k].address));
   st.ended = new Date().toISOString(); save();
   const net = (k) => BigInt(st.end[k]) - BigInt(st.start[k]);
-  const toMaker = BigInt(acc.j?.to_maker || 0) + BigInt(st.steps.claimSilence?.tries?.length ? (jsonOf(st.steps.claimSilence.tries.at(-1).msg)?.to_maker || 0) : 0);
-  const want = { maker: toMaker, client: -toMaker, stranger: 0n };
-  ok(`every account ends where the money says: MAKER up ${Number(toMaker) / 1e18} GEN, CLIENT down the same, STRANGER whole`, Object.keys(want).every((k) => net(k) === want[k]), Object.keys(want).map((k) => k.toUpperCase() + " " + Number(net(k)) / 1e18).join("  "));
+  const toMaker = BigInt(acc.j?.to_maker || 0) + BigInt(st.steps.claimSilence?.tries?.length ? (jsonOf(st.steps.claimSilence.tries.at(-1).msg)?.to_maker || 0) : 0) + BigInt(as3.j?.maker_paid || 0);
+  const bonds = lost * APPEAL_BOND;
+  const want = { maker: toMaker - bonds, client: -toMaker + bonds, stranger: 0n };
+  ok(`every account ends where the money says: MAKER up ${Number(toMaker - bonds) / 1e18} GEN (the fees less ${Number(bonds) / 1e18} GEN of lost bonds), CLIENT down the same, STRANGER whole`, Object.keys(want).every((k) => net(k) === want[k]), Object.keys(want).map((k) => k.toUpperCase() + " " + Number(net(k)) / 1e18).join("  "));
 }
 
 st.checks = { pass, fail, skipped }; save();

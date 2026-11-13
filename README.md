@@ -4,6 +4,50 @@ A commission escrow with a chess clock: after every message the validators
 decide whose move it is now, the clock runs only against that side, and the
 late cut comes out of the fee by the seconds each side actually owed.
 
+## Milestone v1 — what changed
+
+Contract version 2 adds two things to the one-stage contract described below,
+and keeps everything else. A studio that declares no stages behaves exactly as
+before: the same prompts, the same splits, the same refusals.
+
+**Staged commissions.** A studio declares 1 to 4 named stages, each with a
+share of the fee in basis points adding up to 10,000, for example
+`Outline=2000=a list of the points|First draft=3000|Final=5000`. The stages
+are copied onto each commission at request time, with the fee divided in atto
+(the last stage takes the odd atto). A delivery is judged against the brief
+**and** the current stage, which reaches the prompt in its own fenced `STAGE`
+block. When a delivery stands for the current stage the client calls
+`accept_stage`: that stage's share is paid at once, the maker getting it less
+the late cut reached at that moment, taken on that share alone
+(`share - share * cut_bps // 10000`), so no share is ever cut twice and a paid
+stage is never touched again. The next stage starts with the move on the maker;
+accepting the last stage settles the commission. `claim_silence` and
+`cancel_late` settle only the unpaid remainder.
+
+**One bonded appeal per verdict.** Either side may `deposit` credit (payable,
+never runs the model) and `withdraw` it. Within 600 seconds of a judged verdict
+(a press or a delivery), the side it went against may `appeal(commission,
+reason)` once, putting up a 0.1 GEN bond from its credit. One consensus round
+asks the same four askings in the same two orders, with the appellant's reason
+and the other side's last message added as fenced, labelled party argument,
+compared by exact equality. A different verdict replaces the first on the
+message (both are kept), moves the clock and the stage as it implies, gives the
+seconds since the verdict to nobody, and leaves the bond with the appellant.
+The same verdict changes nothing else and moves the bond to the other side's
+credit. An appeal is final. While an appeal is still possible, the favoured
+side cannot settle against the appellant on its own verdict, and the maker
+cannot deliver over a delivered page the client has not answered; neither ever
+waits more than 600 seconds.
+
+New calls: `accept_stage`, `appeal`, `deposit`, `withdraw`, and the view
+`credit_of`. `open_studio` takes a ninth argument, `stages` (`""` for one
+stage). `commission(id)` now shows the stages (name, share, status, what was
+released), the current stage, and the latest judged press and delivery with
+who may appeal them, until when, and what any appeal came to. The deployment
+and the on-chain record under [Evidence](#evidence) are the one-stage contract;
+contract version 2 has not been deployed yet, and `tests/on_chain/smoke.mjs`
+now also walks a three-stage commission with two appeals.
+
 ## The problem
 
 A commission deadline counts wall time. "Delivered in five days" starts when
@@ -165,6 +209,42 @@ The fingerprint is part of the compared value, so a page that does not read
 the same for every validator gets no consensus and nothing is stored. The
 fingerprint is also what the client can later check the page against.
 
+### A delivery at a stage
+
+On a commission with two or more stages the same four askings carry one more
+block after the brief: `STAGE`, the contract's `Stage k of n:` followed by the
+maker's name for the stage and what it said the stage holds, fenced like any
+other party text. The second order puts the page first and the brief and the
+stage after it. The two framings ask about the stage:
+
+> **THERE**: Does this page contain the piece the STAGE block names, the actual
+> work of that stage of the brief complete enough for the client to review,
+> rather than a placeholder, a promise, a fragment, a different stage or
+> something else? Answer yes, no or unclear.
+
+> **MISSING**: Is the piece the STAGE block names missing from this page: the
+> page is empty, a placeholder, only a part of that stage, a different stage,
+> or about something else? Answer yes, no or unclear.
+
+The combine table and the stored value are the ones above. A one-stage
+commission is asked exactly as above, with no STAGE block.
+
+### An appeal
+
+An appeal asks the judgment it appeals again, in one block: the same blocks,
+the same four askings, the same two orders, the same closed tokens, exact
+equality. Two fenced blocks come after the others, `APPEAL` (the appellant's
+reason, at most 300 characters) and `REPLY` (the other side's last message),
+`APPEAL` first in the first order and `REPLY` first in the second. Before the
+blocks the prompt says that the question was answered once already and the
+named side appealed, and that both blocks are untrusted party argument; after
+them, that they count only where the other blocks bear them out. It never says
+what the first answer was. A press appeal rebuilds the thread the press was
+judged with. A delivery appeal fetches the page again and judges it only if it
+still gives the stored fingerprint; otherwise every validator agrees on
+`{"verdict": "changed"}` without asking a model, which counts against the
+maker: a delivered verdict becomes missing and a missing one stands.
+
 ### What every round shares
 
 - The brief, every message, every note and every fetched page are untrusted.
@@ -202,7 +282,7 @@ the contract already holds. Nobody uploads a screenshot and nobody types
 
 | call | who | when |
 |---|---|---|
-| `open_studio(name, about, fee_atto, maker_seconds, client_seconds, step_seconds, cut_bps, max_cut_bps)` | anyone; the sender is the maker | the terms are fixed for good |
+| `open_studio(name, about, fee_atto, maker_seconds, client_seconds, step_seconds, cut_bps, max_cut_bps, stages)` | anyone; the sender is the maker | the terms and the stages are fixed for good |
 | `close_studio(studio)` / `reopen_studio(studio)` | the maker | stops or restarts new commissions only |
 | `request_commission(studio, brief)`, payable | anyone but the maker | with exactly the fee, while the studio is open |
 | `withdraw_request(commission)` | the client | before acceptance |
@@ -211,16 +291,22 @@ the contract already holds. Nobody uploads a screenshot and nobody types
 | `say(commission, text)` | the maker or the client | while active; a press when the sender holds the move |
 | `deliver(commission, url, note)` | the maker | while active |
 | `take_move(commission)` | the maker or the client | while active, onto itself |
-| `accept_work(commission)` | the client | once a delivery is recorded |
-| `claim_silence(commission)` | the maker | while the client holds the move, is past its allowance, and has been charged 300 s on this turn |
-| `cancel_late(commission)` | the client | while the maker holds the move, its cut is at the cap, and it has been charged 300 s on this turn |
+| `accept_stage(commission)` | the client | once a delivery stands for the current stage |
+| `accept_work(commission)` | the client | the same as `accept_stage`, under its one-stage name |
+| `appeal(commission, reason)` | the side the verdict went against | within 600 s of the latest judged press or delivery, once, with 0.1 GEN of credit |
+| `deposit()`, payable | anyone, for itself | never asks the model |
+| `withdraw(amount)` | anyone | its own credit only, paid to itself |
+| `claim_silence(commission)` | the maker | while the client holds the move, is past its allowance, has been charged 300 s on this turn, and can no longer appeal a verdict on one of the maker's messages |
+| `cancel_late(commission)` | the client | while the maker holds the move, its cut is at the cap, it has been charged 300 s on this turn, and it can no longer appeal a verdict on one of the client's messages |
 
-Every write except `open_studio` refuses by who the sender is. `open_studio`
-lets anyone open a studio, makes the sender its maker and touches nothing
-outside it; the test suite lists it with that reason, and fails on any write
-added later that checks no sender. Addresses are compared without letter case.
+Every write except `open_studio`, `deposit` and `withdraw` refuses by who the
+sender is. `open_studio` lets anyone open a studio, makes the sender its maker
+and touches nothing outside it; `deposit` and `withdraw` only ever touch the
+sender's own credit, keyed by the sender's address. The test suite lists the
+three with those reasons, and fails on any write added later that checks no
+sender. Addresses are compared without letter case.
 
-`request_commission` is the only payable call. It never asks the model and
+`request_commission` and `deposit` are the only payable calls. It never asks the model and
 never raises after taking value: a refusal returns everything sent in the same
 transaction and answers `{"ok": false, "reason": ..., "returned": ...}`. The
 other writes take no value and refuse by raising.
@@ -229,7 +315,7 @@ Views take a short id, a small number or one address, never a text and never a
 time: `studio(id)`, `studios(offset, limit)`, `studios_of(address, offset,
 limit)`, `commission(id)`, `messages_of(commission, offset, limit)`,
 `commissions_of(address, offset, limit)`, `studio_commissions(studio, offset,
-limit)`, `stats()` and `rules()`. Lists come in pages of at most 20.
+limit)`, `credit_of(address)`, `stats()` and `rules()`. Lists come in pages of at most 20.
 `commission(id)` returns the clock as stored (`holder`, `since`, `handed_by`,
 `grace`, `maker_used`, `client_used`), the terms, and `cap_after`, the maker's
 use past which the cut is at its cap. It also returns `now`, the chain's clock
@@ -243,11 +329,13 @@ at the read, and `maker_live` and `client_live` worked out from it (all three
 |---|---|
 | `request_commission` | the client pays exactly the fee; the contract holds it |
 | `withdraw_request`, `decline` | the whole fee back to the client |
-| `accept_work` | the maker gets `fee - cut`, the client gets `cut` |
-| `claim_silence`, with a delivery | as `accept_work` |
-| `claim_silence`, without | the maker gets `fee * min(2500, 10000 - cut_bps) // 10000`, the client the rest |
-| `cancel_late`, without a delivery | the whole fee back to the client |
-| `cancel_late`, with a delivery | as `accept_work` at the cap |
+| `accept_stage` / `accept_work`, a stage before the last | the stage's share is paid: the maker gets `share - share * cut_bps // 10000`, the client that cut |
+| `accept_stage` / `accept_work`, the last stage | the maker gets `remainder - cut`, the client gets `cut`; one stage: `fee - cut` and `cut` |
+| `claim_silence`, a delivery standing for the stage | that stage as accepted, plus `rest * min(2500, 10000 - cut_bps) // 10000` of the stages after it; the client the rest |
+| `claim_silence`, without | the maker gets `remainder * min(2500, 10000 - cut_bps) // 10000`, the client the rest |
+| `cancel_late`, without a delivery for the stage | the whole remainder back to the client |
+| `cancel_late`, with one | that stage as accepted at the cap, the rest back to the client |
+| `deposit` / `withdraw` | credit in and out; an upheld appeal moves 0.1 GEN of the appellant's credit to the other side's |
 | a refused payable call | everything sent goes back to the sender, in the same transaction |
 
 The late cut, from the seconds the contract stored:
@@ -263,11 +351,13 @@ With the demonstration's terms (900 s, a step of 60 s, 10% a step, at most
 1,141 s the cut is 50% and the client may cancel instead, once the maker's
 current turn has been charged 300 s.
 
-Every settlement is O(1), goes through one exit, and pays out exactly the held
-fee: the client gets precisely what the maker does not. The contract always
-holds exactly the fees of the commissions requested or active. The offline
-suite checks that, and the clock, after every step of sixteen seeded random
-journeys.
+Every settlement is O(1) (its one loop is over at most four stages), goes
+through one exit, and pays out exactly the unpaid remainder: the client gets
+precisely what the maker does not, and stages already paid are never touched.
+The contract always holds exactly the unpaid remainders of the commissions
+requested or active, plus every credit. The offline suite checks that, the
+stages and the clock after every step of twenty-four seeded random journeys,
+which open staged and one-stage studios and appeal as they go.
 
 Each studio carries a public record, updated as things happen: commissions,
 finished on time, finished late, cancelled late, lapsed, declined, withdrawn,
@@ -293,6 +383,12 @@ other demo jobs and their pages are under [The site](#the-site)):
 | `mug-placeholder.html` | "Draft coming soon." | missing |
 | `mug-outline.html` | a bullet outline | missing |
 | `teapot.html` | a finished description of a teapot: the wrong piece | missing |
+| `mug-first-draft.html` | the description without its care line, marked as a first draft | missing against the brief; delivered for the staged run's First draft stage |
+
+The staged run divides the same brief into three stages, `Outline` (2,000 basis
+points), `First draft` (3,000) and `Final` (5,000): `mug-outline.html`,
+`mug-first-draft.html` and `mug-final.html` are each the piece of one stage, and
+`mug-placeholder.html` is missing at any stage.
 
 The thread changes one thing per message:
 
@@ -351,6 +447,20 @@ The thread changes one thing per message:
 - **The cap must be reachable.** A studio's terms must bring the cut to its
   cap within 30 days of the maker's allowance running out, so a client whose
   maker goes silent can always cancel.
+- **A stage is judged as the maker named it.** The stage names and what each
+  holds are the maker's words, fixed when the studio opens and fenced in the
+  prompt; a vague stage gives the validators little to agree on. A delivery
+  stands for the stage current when it was judged.
+- **An appeal is one more reading, not a second opinion from somebody else.**
+  The same validators' models read the same blocks again with the appellant's
+  argument and the other side's last message. Only the latest judged press and
+  the latest judged delivery can be appealed, within 600 seconds; an appeal is
+  final. A delivery appeal reads the page again and judges it only if it still
+  gives the stored fingerprint; a page that changed, answers an error or reads
+  as nothing is read against the maker, who controls it. An appeal changes the
+  clock only when nothing moved it or was judged since the verdict; otherwise
+  it corrects the record and the stage's delivery, and money already paid never
+  moves.
 - **Texts are printable ASCII on one line.** Names 3 to 60 characters, about
   lines up to 300, briefs 40 to 800, messages 1 to 600, notes up to 300.
   Delivery addresses are `https`, at most 200 characters, with a lowercase host,
@@ -361,7 +471,7 @@ The thread changes one thing per message:
 
 ```
 contracts/commission_clock.py   the contract
-drafts/                         the demo pages a maker can deliver: four demo jobs, five pages each
+drafts/                         the demo pages a maker can deliver: four demo jobs, five pages each, and a first draft
 tests/test_pure.py              the offline suite, including the consensus rounds with a world per node
 tests/MUTATIONS.md              every defence removed in turn, and the test that caught it
 tests/on_chain/smoke.mjs        a throwaway-account run against Studio
@@ -380,10 +490,10 @@ genvm-lint check contracts/commission_clock.py
 python tools/mutate.py                        # rewrites tests/MUTATIONS.md; exits 1 if a mutant survives
 ```
 
-On this repository as it stands, `pytest tests/ -q` gives **207 passed** in
-under a second. `genvm-lint check` (genvm-linter 0.11.0) prints
-`Lint passed (3 checks)` and reports 22 methods, 9 view and 13 write.
-`python tools/mutate.py` removes or inverts **263 defences** one at a time,
+On this repository as it stands, `pytest tests/ -q` gives **268 passed** in
+a few seconds. `genvm-lint check` (genvm-linter 0.11.0) prints
+`Lint passed (3 checks)` and reports 27 methods, 10 view and 17 write.
+`python tools/mutate.py` removes or inverts **378 defences** one at a time,
 and **none survives**.
 
 The on-chain run uses three throwaway keys it generates itself (MAKER, CLIENT,
@@ -393,7 +503,7 @@ the repository first and pass that commit:
 
 ```
 npm ci
-COMMIT=<40-character sha> node tests/on_chain/smoke.mjs        # about fifty minutes
+COMMIT=<40-character sha> node tests/on_chain/smoke.mjs        # about eighty minutes
 COMMIT=<sha> RESUME=1 node tests/on_chain/smoke.mjs            # continue from the saved state
 ```
 
@@ -410,7 +520,13 @@ is refused and refunded, and an early cancel and an early silence claim are
 both refused. The early claim is sent only when the chain's clock shows at
 least four minutes before a claim could open; if the deliver round and its wait
 used more, it prints SKIP and why, rather than racing a claim that could
-succeed. It prints a PASS or FAIL line for every check, the balances
+succeed. It then opens a second studio in the three demo stages and walks a
+commission through them: a placeholder judged missing and appealed by the maker
+(expected: missing again, the bond to the client), the outline, the first
+draft and the final page each delivered and accepted, and a keep on a question
+the brief answers, appealed too (expected: keep again). Each appeal is sent
+only while the chain's clock shows at least two minutes of its window left;
+otherwise it prints SKIP. It prints a PASS or FAIL line for every check, the balances
 before and after every step that moves money, `N passed, M failed`, and the
 contract address.
 
@@ -510,6 +626,8 @@ GenLayer Studio, chain 61999, RPC `https://studio.genlayer.com/api`, explorer
 line.
 
 ## Evidence
+
+This record is of the one-stage contract (version 1), before the milestone above; version 2 has not been deployed.
 
 Run on 13 October 2026 on GenLayer Studio (chain 61999) by `tests/on_chain/smoke.mjs`, from three generated accounts,
 one per role: **MAKER**, **CLIENT** and **STRANGER**. The deliveries were the files in `drafts/` read from
