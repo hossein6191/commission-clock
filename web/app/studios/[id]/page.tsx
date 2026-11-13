@@ -14,6 +14,7 @@ import { CommissionRow } from "@/components/commission-row";
 import { Placeholder, ReadError } from "@/components/read-state";
 import { RecordGrid } from "@/components/record-grid";
 import { StageTrack } from "@/components/stages";
+import { stageShares } from "@/lib/stages";
 import { TxStage } from "@/components/tx-stage";
 import { useMe } from "@/components/use-me";
 import { useAfterTx, useRead } from "@/components/use-read";
@@ -111,7 +112,7 @@ function StudioView({ id }: { id: string }) {
               Its terms, fixed for good
             </h2>
             <TermsList s={s} className="mt-3" />
-            {s.stages.length > 0 && <StageTrack className="mt-3" stages={s.stages} current={0} terms />}
+            {s.stages.length > 0 && <StageTrack className="mt-3" stages={(() => { const sh = stageShares(BigInt(s.feeAtto || "0"), s.stages.map((x) => x.shareBps)); return s.stages.map((x, i) => ({ ...x, shareAtto: sh[i].toString() })); })()} current={0} terms />}
             {s.stages.length > 1 && (
               <p className="mt-2 text-[13px] text-ink-2">
                 Each stage is delivered and judged on its own, and its share is paid the moment you accept it; the late cut on a stage is taken from that stage&apos;s share alone.

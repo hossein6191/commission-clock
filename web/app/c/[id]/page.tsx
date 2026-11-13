@@ -378,7 +378,7 @@ function Room({ id }: { id: string }) {
         <LiveClock c={c} />
       </div>
 
-      {staged && <StageTrack stages={c.stages} current={c.status === "active" ? c.stage : 0} />}
+      {staged && <StageTrack stages={c.status === "requested" ? c.stages.map((x) => ({ ...x, status: "pending" })) : c.stages} current={c.status === "active" ? c.stage : 0} />}
 
       {doing && (tx.hash || tx.sending || tx.error) ? (
         <TxStage
