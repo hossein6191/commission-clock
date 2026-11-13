@@ -18,8 +18,18 @@ import {
   DEMO_JOBS,
   DEMO_STUDIO_NAME,
   DEMO_TERMS,
+  ALL_ACTION_KEYS,
+  ALL_DRAFT_FILES,
+  DEMO_STAGES,
   DRAFTS,
   FETCH_FAILED,
+  STAGED_ACTION_KEYS,
+  STAGED_DRAFTS,
+  STAGED_JOB,
+  STAGED_STUDIO_NAME,
+  STAGED_TERMS,
+  demoJobOf,
+  stagedVerdict,
   JOB_KEYS,
   LATER,
   actionOf,
@@ -38,7 +48,7 @@ import {
   scriptedDelivery,
   scriptedPress,
 } from "../../lib/demo-studio.ts";
-import { MAX_NOTE, briefProblem, messageProblem, termsOfProblem, textProblem, urlProblem } from "../../lib/rules.ts";
+import { MAX_NOTE, briefProblem, messageProblem, stagesOf, termsOfProblem, textProblem, urlProblem } from "../../lib/rules.ts";
 
 const KEY = "ab".repeat(32);
 const src = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -86,10 +96,10 @@ test("the demo studio's terms open, and its drafts are pinned addresses the cont
 test("each draft's fingerprint is the first 16 hex of the sha256 of its text, spacing collapsed, as every validator takes it", () => {
   // Every page in drafts/ is one the demo knows, and the site serves exactly those.
   const pages = (dir) => readdirSync(new URL(dir, import.meta.url)).filter((n) => n.endsWith(".html") && !n.startsWith("._")).sort();
-  assert.deepEqual(pages("../../../drafts/"), DRAFTS.map((d) => d.file).sort(), "drafts/ holds exactly the demo's pages");
-  assert.deepEqual(pages("../../public/drafts/"), DRAFTS.map((d) => d.file).sort(), "public/drafts/ holds exactly the same");
+  assert.deepEqual(pages("../../../drafts/"), [...ALL_DRAFT_FILES].sort(), "drafts/ holds exactly the demo's pages");
+  assert.deepEqual(pages("../../public/drafts/"), [...ALL_DRAFT_FILES].sort(), "public/drafts/ holds exactly the same");
   assert.equal(new Set(DRAFTS.map((d) => d.fp)).size, DRAFTS.length, "no two pages share a fingerprint");
-  for (const d of DRAFTS) {
+  for (const d of [...DRAFTS, ...STAGED_DRAFTS]) {
     const raw = readFileSync(new URL(`../../../drafts/${d.file}`, import.meta.url), "utf8");
     const text = raw.slice(0, 32000).split(/\s+/).filter(Boolean).join(" ").slice(0, 8000);
     assert.equal(createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16), d.fp, d.file);
@@ -245,7 +255,7 @@ test("the demo maker acts only on its own studio's commissions with a demo brief
 
 test("the routes take a fixed action key and a commission id, and nothing a visitor types is ever signed", () => {
   const act = src("../../app/api/demo/act/route.ts");
-  assert.match(act, /ACTION_KEYS as string\[\]\)\.includes\(body\.action\)/, "the action must be one of the fixed keys");
+  assert.match(act, /ALL_ACTION_KEYS as string\[\]\)\.includes\(body\.action\)/, "the action must be one of the fixed keys");
   assert.match(act, /parseCommissionId\(body\.commission\)/);
   assert.match(act, /text\.length > 200/, "a long body is refused before it is parsed");
   assert.doesNotMatch(act, /body\.(text|message|url|note)/, "no free text is read from the body");
@@ -255,9 +265,9 @@ test("the routes take a fixed action key and a commission id, and nothing a visi
   // An unknown key is refused before anything is read; the commission's brief, read fresh, is checked
   // against the demo jobs before anything is signed, and only picks which job's fixed move is signed.
   assert.match(server, /if \(what !== "accept" && !isActionKey\(what\)\) return \{ status: 400/);
-  assert.match(server, /demoActProblem\(row \? \{ id: row\.id, studio: row\.studio, status: row\.status, brief: row\.brief \} : null, s\.studio, what, s\.drafts\)/);
+  assert.match(server, /demoActProblem\(row \? \{ id: row\.id, studio: row\.studio, status: row\.status, brief: row\.brief \} : null, studios, what, s\.drafts\)/);
   assert.ok(server.indexOf("demoActProblem(row") < server.indexOf("writeContract"), "the brief is checked before the signature");
-  assert.match(server, /demoActionFor\(row!\.brief, what\)/);
+  assert.match(server, /actionOf\(what, demoJobOf\(row!, studios\)!\.key\)/);
   // What it signs comes from the script: the message text and the delivery note are the action's own.
   assert.match(server, /functionName: "say", args: \[commission, action\.text\]/);
   assert.match(server, /functionName: "deliver", args: \[commission, draftUrl\(repoOf\(REPO_URL\), draftsCommit\(\), draftOf\(action\.draft!, action\.job\)\.file\), action\.text\]/);
@@ -278,4 +288,38 @@ test("the key is never logged or returned, and the status names exactly what is 
   for (const reason of ["the contract is not deployed yet", "Studio's RPC did not answer", "holds no GEN", "the demo studio is not open on this contract yet", "not pinned to a commit"]) assert.ok(server.includes(reason), reason);
   const status = src("../../app/api/demo/status/route.ts");
   assert.match(status, /cache-control": "no-store"/);
+});
+
+test("the three-stage demo studio: its terms and stages open, its four pages each stand for one stage, and its script is fixed", () => {
+  assert.equal(termsOfProblem(STAGED_TERMS), "");
+  const parsed = stagesOf(DEMO_STAGES);
+  assert.equal(parsed.problem, "");
+  assert.deepEqual(parsed.stages.map((x) => [x.name, x.bps]), [["Outline", 2000], ["First draft", 3000], ["Final", 5000]]);
+  assert.notEqual(STAGED_STUDIO_NAME, DEMO_STUDIO_NAME);
+  assert.equal(STAGED_JOB.brief, DEMO_BRIEF, "the mug brief, word for word");
+  assert.deepEqual(STAGED_JOB.actions.map((a) => a.key), STAGED_ACTION_KEYS);
+  assert.deepEqual(ALL_ACTION_KEYS, [...ACTION_KEYS, "first_draft"]);
+  // Each page is delivered at its own stage and missing at every other; the placeholder at none.
+  const want = { placeholder: [0, "mug-placeholder.html"], outline: [1, "mug-outline.html"], first_draft: [2, "mug-first-draft.html"], final: [3, "mug-final.html"] };
+  for (const d of STAGED_DRAFTS) {
+    assert.deepEqual([d.stage, d.file], want[d.key], d.key);
+    for (const k of [1, 2, 3]) assert.equal(stagedVerdict(d, k), d.stage === k ? "delivered" : "missing", `${d.key} at stage ${k}`);
+    const url = draftUrl("demo-owner/commission-clock", "0123456789abcdef0123456789abcdef01234567", d.file);
+    for (const k of [1, 2, 3]) assert.deepEqual(scriptedDelivery(url, DEMO_BRIEF, k), { verdict: stagedVerdict(d, k), fp: d.fp });
+  }
+  for (const a of STAGED_JOB.actions.filter((x) => x.kind === "deliver")) {
+    assert.equal(draftOf(a.draft, "staged").key, a.key);
+    for (const k of [1, 2, 3]) assert.equal(expectedVerdict(a, "maker", k), stagedVerdict(draftOf(a.draft, "staged"), k));
+  }
+  // The demo maker picks the staged script only on the staged studio, and only with the mug brief.
+  const studios = { studio: "S1", staged: "S3" };
+  const act = { id: "C9", studio: "S3", status: "active", brief: DEMO_BRIEF };
+  assert.equal(demoJobOf(act, studios), STAGED_JOB);
+  assert.equal(demoJobOf({ ...act, studio: "S1" }, studios), jobOf("mug"));
+  assert.equal(demoJobOf({ ...act, brief: jobOf("cafe").brief }, studios), null);
+  for (const k of STAGED_ACTION_KEYS) assert.equal(demoActProblem(act, studios, k, true), "", k);
+  assert.equal(demoActProblem(act, studios, "wrong", true), "the demo maker does only what its buttons say", "no teapot on the staged studio");
+  assert.equal(demoActProblem({ ...act, studio: "S1" }, studios, "first_draft", true), "the demo maker does only what its buttons say", "no first draft on the one-stage studio");
+  assert.equal(demoActProblem({ ...act, brief: jobOf("cafe").brief }, studios, "outline", true), offScript("C9", false, true));
+  assert.equal(isDemoStudio({ maker: "0xab", name: STAGED_STUDIO_NAME }, "0xab"), true);
 });

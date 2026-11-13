@@ -6,12 +6,18 @@
 // with its verdict; the composer for the two parties; the demo maker's next moves on a commission of
 // the demo studio, from the script of the demo job its brief is (or why there are none); a waiting
 // panel while the validators judge a press or read a draft page; and the result slip once it settles. Every transaction shows its explorer link from the first second.
+//
+// Contract version 2: a commission paid in stages draws its stage track under the clock, and the client
+// accepts each delivered stage (accept_stage; accept_work on one stage). The latest judged press and
+// delivery carry their appeal window: the side a verdict went against may appeal it once, with a reason
+// and a 0.1 GEN bond from its credit, which the credit panel deposits and withdraws.
 
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { Addr } from "@/components/addr";
+import { AppealPanel, CreditPanel } from "@/components/appeal";
 import { StatusPill, TxList, DemoNote } from "@/components/bits";
 import { Brass, BrassLink } from "@/components/button";
 import { LiveClock, clockOf, useCommissionNow } from "@/components/chess-clock";
@@ -20,6 +26,7 @@ import { DemoMoves, OffScriptNote } from "@/components/demo-moves";
 import { PressCard } from "@/components/press-card";
 import { Placeholder, ReadError } from "@/components/read-state";
 import { SettlementReceipt } from "@/components/settlement";
+import { StageTrack } from "@/components/stages";
 import { TxStage } from "@/components/tx-stage";
 import { useDemoStatus } from "@/components/use-demo";
 import { useMe } from "@/components/use-me";
@@ -28,11 +35,13 @@ import { useAfterTx, useRead } from "@/components/use-read";
 import { useTx } from "@/components/use-tx";
 import { WaitPanel, waitOf } from "@/components/wait-panel";
 import { WalletGate } from "@/components/wallet-gate";
-import { calls, isMock, pressOutcome, readCommission, readMessages, readStudio, requestDemoAccept, requestDemoAct, studioPath, unsettledWhy } from "@/lib/chain";
-import { acceptSplit, cancelOpensIn, silenceOpensIn, silenceSplit, cancelSplit } from "@/lib/clock";
-import { draftOf, draftOfUrl, isDemoStudio, jobOfBrief, type DemoAction } from "@/lib/demo-studio";
-import { gen, pageName, span } from "@/lib/format";
-import { commissionGuide, demoGuide, judgeGuide, noteGuide, readGuide, sendingGuide, signGuide, type Guide, type Role } from "@/lib/guide";
+import { appealOutcome, calls, isMock, pressOutcome, readCommission, readMessages, readStudio, requestDemoAccept, requestDemoAct, studioPath, unsettledWhy } from "@/lib/chain";
+import { cancelOpensIn, silenceOpensIn } from "@/lib/clock";
+import { redeliverWaitsUntil, settleWaitsUntil, type VerdictView } from "@/lib/appeal";
+import { settleSplits } from "@/lib/stages";
+import { STAGED_STUDIO_NAME, draftOf, draftOfUrl, isDemoStudio, jobOfBrief, stagedJobOfBrief, type DemoAction } from "@/lib/demo-studio";
+import { clockTime, gen, pageName, span } from "@/lib/format";
+import { appealGuide, commissionGuide, demoGuide, judgeGuide, noteGuide, readGuide, sendingGuide, signGuide, type Guide, type Role } from "@/lib/guide";
 import { ACCEPT_WINDOW, PAGE, parseCommissionId, type Side } from "@/lib/rules";
 import { rememberTx } from "@/lib/tx-memory";
 import type { Call, Commission, Message, Paged, TxStatus } from "@/lib/types";
@@ -56,7 +65,7 @@ export default function CommissionPage() {
 }
 
 /** What one transaction of this room is doing, for its waiting panel. */
-type Doing = { call: Call; label: string; sign: Guide; sending: Guide; judged: boolean; presser?: Side };
+type Doing = { call: Call; label: string; sign: Guide; sending: Guide; judged: boolean; presser?: Side; appeal?: { kind: "say" | "deliver"; verdict: string } };
 
 function Room({ id }: { id: string }) {
   const me = useMe();
@@ -72,6 +81,7 @@ function Room({ id }: { id: string }) {
   const now = useCommissionNow(c);
   const [doing, setDoing] = React.useState<Doing | null>(null);
   const [freshMessage, setFreshMessage] = React.useState("");
+  const [credit, setCredit] = React.useState("");
   const [demoAsk, setDemoAsk] = React.useState<{ what: string; reason?: string; state: "asking" | "failed" } | null>(null);
 
   useAfterTx(() => {
@@ -82,8 +92,10 @@ function Room({ id }: { id: string }) {
   const tx = useTx((s: TxStatus, hash: string, call: Call) => {
     const out = pressOutcome(s);
     if (out?.message) setFreshMessage(out.message);
+    const ap = appealOutcome(s);
+    if (ap) setFreshMessage(ap.message);
     const why = unsettledWhy(s);
-    if (why) rememberTx(id, hash, `${call.fn === "deliver" ? "Delivery" : "Message"} stored nothing: ${why}`);
+    if (why) rememberTx(id, hash, `${call.fn === "deliver" ? "Delivery" : call.fn === "appeal" ? "Appeal" : "Message"} stored nothing: ${why}`);
   });
 
   if (commission.error) return <ReadError detail={commission.error} onRetry={commission.retry} />;
@@ -106,9 +118,21 @@ function Room({ id }: { id: string }) {
   const fee = BigInt(c.feeAtto || "0");
   const t = now || c.now;
   const isDemo = !!demo && !!studio.data && (demo.studio === c.studio || isDemoStudio(studio.data, demo.maker));
-  // The demo maker plays only the four demo briefs, word for word: the brief picks its script.
-  const job = jobOfBrief(c.brief);
+  // The demo maker plays only its demo briefs, word for word: the studio and the brief pick its script.
+  const stagedStudio = studio.data?.name === STAGED_STUDIO_NAME;
+  const job = stagedStudio ? stagedJobOfBrief(c.brief) : jobOfBrief(c.brief);
   const demoJob = isDemo && !!job;
+  // Stages: the current one, its share, whether a delivery stands for it, and what is still held.
+  const staged = c.nStages > 1;
+  const cur = c.stages[c.stage - 1];
+  const last = c.stage >= c.nStages;
+  const delivered = cur ? cur.deliveredBy > 0 : c.deliveries > 0;
+  const held = c.status === "active" ? BigInt(c.heldAtto || c.feeAtto || "0") : fee;
+  const shareAtto = cur ? BigInt(cur.shareAtto || "0") : held;
+  const stageInfo = cur ? { k: c.stage, n: c.nStages, name: cur.name } : undefined;
+  const stageLabel = staged && cur ? `stage ${c.stage} of ${c.nStages} (${cur.name})` : "";
+  const splits = settleSplits(clock, held, shareAtto, delivered, last, t);
+  const lastDeliveryN = c.lastDelivery?.n ?? 0;
   const busy = tx.sending || (!!tx.hash && !tx.final) || demoAsk?.state === "asking";
   const guideInput = {
     role,
@@ -125,6 +149,11 @@ function Room({ id }: { id: string }) {
     cutBpsTotal: c.cutBpsTotal,
     demo: demoJob,
     mock: isMock,
+    stage: staged ? stageInfo : undefined,
+    stageDelivered: delivered,
+    heldAtto: held.toString(),
+    shareAtto: shareAtto.toString(),
+    settleWaitsUntil: party ? settleWaitsUntil(c.lastPress, c.lastDelivery, party, t, c.status) : 0,
   };
   const stage: "busy" | "late" = wall && tx.at && wall - tx.at > LATE_AFTER ? "late" : "busy";
 
@@ -168,13 +197,25 @@ function Room({ id }: { id: string }) {
 
   // ---- the settlement buttons open right now ----
   const actions: React.ReactNode[] = [];
-  const settle = (fn: "accept_work" | "claim_silence" | "cancel_late", call: Call, label: string, split: { toMaker: bigint; toClient: bigint }) =>
+  const settle = (fn: "accept_work" | "accept_stage" | "claim_silence" | "cancel_late", call: Call, label: string, split: { toMaker: bigint; toClient: bigint }) => {
+    const more = { stage: staged ? stageInfo : undefined, heldAtto: held.toString() };
     void run({
       call,
       label,
       judged: false,
-      sign: signGuide({ fn, label, feeAtto: c.feeAtto, toMakerAtto: split.toMaker.toString(), toClientAtto: split.toClient.toString(), holder: c.holder, role, mock: isMock }),
-      sending: sendingGuide({ fn, target: c.id, feeAtto: c.feeAtto, toMakerAtto: split.toMaker.toString(), toClientAtto: split.toClient.toString(), holder: c.holder, role, mock: isMock }),
+      sign: signGuide({ fn, label, feeAtto: c.feeAtto, toMakerAtto: split.toMaker.toString(), toClientAtto: split.toClient.toString(), holder: c.holder, role, mock: isMock, ...more }),
+      sending: sendingGuide({ fn, target: c.id, feeAtto: c.feeAtto, toMakerAtto: split.toMaker.toString(), toClientAtto: split.toClient.toString(), holder: c.holder, role, mock: isMock, ...more }),
+    });
+  };
+  const onAppeal = (target: VerdictView, reason: string) =>
+    void run({
+      call: calls.appeal(c.id, reason),
+      label: `Appeal of ${target.message} (${target.verdict})`,
+      judged: true,
+      presser: party ?? undefined,
+      appeal: { kind: target.kind === "deliver" ? "deliver" : "say", verdict: target.verdict },
+      sign: signGuide({ fn: "appeal", label: `Appeal the verdict on ${target.message} with a 0.1 GEN bond`, feeAtto: c.feeAtto, holder: c.holder, role, mock: isMock }),
+      sending: appealGuide({ role, commission: c.id, appellant: party ?? "maker", kind: target.kind === "deliver" ? "deliver" : "say", verdict: target.verdict, holder: c.holder, feeAtto: c.feeAtto, stage: "busy", mock: isMock }),
     });
   if (c.status === "requested") {
     if (role === "client")
@@ -240,17 +281,25 @@ function Room({ id }: { id: string }) {
       );
   }
   if (c.status === "active") {
-    if (role === "client" && c.deliveries > 0) {
-      const split = acceptSplit(clock, fee, t);
+    if (role === "client" && delivered) {
+      const split = splits.accept;
       actions.push(
-        <Brass key="accept-work" disabled={busy} onClick={() => settle("accept_work", calls.acceptWork(c.id), `Accepting the work on ${c.id}`, split)}>
-          Accept the work: {gen(split.toMaker)} to the maker
-        </Brass>,
+        staged ? (
+          <Brass key="accept-stage" disabled={busy} onClick={() => settle("accept_stage", calls.acceptStage(c.id), `Accepting stage ${c.stage} (${cur?.name ?? ""}) on ${c.id}`, split)}>
+            {last ? `Accept the last stage: ${gen(split.toMaker)} to the maker, settled` : `Accept stage ${c.stage}: ${gen(split.toMaker)} to the maker now`}
+          </Brass>
+        ) : (
+          <Brass key="accept-work" disabled={busy} onClick={() => settle("accept_work", calls.acceptWork(c.id), `Accepting the work on ${c.id}`, split)}>
+            Accept the work: {gen(split.toMaker)} to the maker
+          </Brass>
+        ),
       );
     }
+    // A settlement against a side waits while that side may still appeal a verdict on the settler's own message.
+    const waitFor = (who: Side) => Math.max(0, settleWaitsUntil(c.lastPress, c.lastDelivery, who, t, c.status) - t);
     if (role === "client" && c.holder === "maker") {
-      const opens = cancelOpensIn(clock, t);
-      const split = cancelSplit(clock, fee, c.deliveries, t);
+      const opens = Math.max(cancelOpensIn(clock, t), waitFor("client"));
+      const split = splits.cancel;
       actions.push(
         <Brass key="cancel" variant="danger" disabled={busy || opens > 0} onClick={() => settle("cancel_late", calls.cancelLate(c.id), `Cancelling ${c.id} late`, split)}>
           {opens > 0 ? `Cancel late: opens in ${span(opens)}` : `Cancel late: ${gen(split.toClient)} back to you`}
@@ -258,8 +307,8 @@ function Room({ id }: { id: string }) {
       );
     }
     if (role === "maker" && c.holder === "client") {
-      const opens = silenceOpensIn(clock, t);
-      const split = silenceSplit(clock, fee, c.deliveries, t);
+      const opens = Math.max(silenceOpensIn(clock, t), waitFor("maker"));
+      const split = splits.silence;
       actions.push(
         <Brass key="silence" variant="danger" disabled={busy || opens > 0} onClick={() => settle("claim_silence", calls.claimSilence(c.id), `Claiming the client's silence on ${c.id}`, split)}>
           {opens > 0 ? `Claim silence: opens in ${span(opens)}` : `Claim the client's silence: ${gen(split.toMaker)} to you`}
@@ -286,6 +335,13 @@ function Room({ id }: { id: string }) {
   };
 
   const viewerSide: Side | "visitor" = party ?? "visitor";
+  // The maker may not deliver over a delivered page for this stage while the client may still appeal it and has written nothing since.
+  const clientWroteSince = messages.some((m) => m.role === "client" && m.n > lastDeliveryN);
+  const redeliverUntil = redeliverWaitsUntil(c.lastDelivery, c.stages.length ? (messages.find((m) => m.n === lastDeliveryN)?.stage ?? c.stage) : c.stage, c.stage, clientWroteSince, t, c.status);
+  const deliverWait =
+    redeliverUntil > t
+      ? `The client may appeal the page delivered for this stage until ${clockTime(redeliverUntil, t)} (${span(redeliverUntil - t)} from now). You can deliver again once that window closes, the client writes, or it is appealed.`
+      : "";
 
   return (
     <div className="flex flex-col gap-8">
@@ -293,6 +349,8 @@ function Room({ id }: { id: string }) {
         <div className="min-w-0">
           <p className="kicker flex flex-wrap items-center gap-x-2 text-ink-3">
             <span>Commission {c.id}</span>·
+            {staged && <span>Stage {c.stage} of {c.nStages}</span>}
+            {staged && "·"}
             <Link className="link normal-case tracking-normal" href={studioPath(c.studio)}>
               {c.studioName || c.studio}
             </Link>
@@ -320,6 +378,8 @@ function Room({ id }: { id: string }) {
         <LiveClock c={c} />
       </div>
 
+      {staged && <StageTrack stages={c.stages} current={c.status === "active" ? c.stage : 0} />}
+
       {doing && (tx.hash || tx.sending || tx.error) ? (
         <TxStage
           tx={tx}
@@ -327,7 +387,9 @@ function Room({ id }: { id: string }) {
           sending={
             doing.judged && doing.call.fn === "say"
               ? judgeGuide({ role, commission: c.id, presser: doing.presser ?? party ?? "maker", feeAtto: c.feeAtto, stage, mock: isMock })
-              : doing.judged && doing.call.fn === "deliver"
+              : doing.appeal
+                ? appealGuide({ role, commission: c.id, appellant: doing.presser ?? "maker", kind: doing.appeal.kind, verdict: doing.appeal.verdict, holder: c.holder, feeAtto: c.feeAtto, stage, mock: isMock })
+                : doing.judged && doing.call.fn === "deliver"
                 ? readGuide({ role, commission: c.id, page: pageName(String(doing.call.args[1])) || String(doing.call.args[1]), feeAtto: c.feeAtto, holder: c.holder, stage, mock: isMock })
                 : doing.sending
           }
@@ -348,6 +410,20 @@ function Room({ id }: { id: string }) {
           })}
         />
       )}
+
+      <AppealPanel
+        id={c.id}
+        role={role}
+        status={c.status}
+        press={c.lastPress}
+        delivery={c.lastDelivery}
+        now={t}
+        holder={c.holder}
+        feeAtto={c.feeAtto}
+        creditAtto={credit}
+        busy={busy}
+        onAppeal={onAppeal}
+      />
 
       <SettlementReceipt c={c} />
 
@@ -371,7 +447,16 @@ function Room({ id }: { id: string }) {
           ) : (
             <ol className="mt-3 flex flex-col gap-3">
               {messages.map((m) => (
-                <PressCard key={m.id} m={m} viewer={viewerSide} fresh={m.id === freshMessage} />
+                <PressCard
+                  key={m.id}
+                  m={m}
+                  viewer={viewerSide}
+                  fresh={m.id === freshMessage}
+                  latest={m.kind === "say" ? c.lastPress : m.kind === "deliver" ? c.lastDelivery : null}
+                  now={t}
+                  status={c.status}
+                  stageName={staged ? c.stages[m.stage - 1]?.name : undefined}
+                />
               ))}
             </ol>
           )}
@@ -398,6 +483,9 @@ function Room({ id }: { id: string }) {
                 deliveries={c.deliveries}
                 brief={c.brief}
                 busy={busy}
+                stageLabel={stageLabel}
+                deliverWait={deliverWait}
+                staged={job?.key === "staged"}
                 onSay={(text, press) =>
                   void run({
                     call: calls.say(c.id, text),
@@ -434,13 +522,14 @@ function Room({ id }: { id: string }) {
           {demoJob && c.status === "active" && role !== "maker" && demo && (
             <>
               {demo.online ? (
-                <DemoMoves job={job!} holder={c.holder} busy={busy} drafts={demo.drafts} draftsReason={demo.draftsReason} onAct={onDemoAct} />
+                <DemoMoves job={job!} holder={c.holder} stage={c.stage} stageName={staged ? cur?.name : ""} busy={busy} drafts={demo.drafts} draftsReason={demo.draftsReason} onAct={onDemoAct} />
               ) : (
                 <DemoNote />
               )}
             </>
           )}
           {demoJob && c.status === "requested" && !demo?.online && <DemoNote />}
+          {party && me.address && <CreditPanel address={me.address} onCredit={setCredit} />}
           <section aria-labelledby="sent-title">
             <h2 id="sent-title" className="text-[20px]">
               Sent from this browser

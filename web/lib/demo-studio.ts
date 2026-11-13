@@ -10,6 +10,12 @@
 // every validator fetches the same bytes. A commission with any other brief gets nothing from it.
 // Nothing a visitor types ever passes through the demo maker. Every studio, shop and person here is
 // fictional. Pure, so node runs it in tests/unit.
+//
+// Contract version 2 adds a second demo studio from the same key, Fernhill Pottery, in stages: the
+// mug brief paid in three stages (Outline 20%, First draft 30%, Final 50%), so a visitor can walk every
+// stage, accept each one and see its share paid, and appeal a verdict that went against them. Its
+// script is the mug's three messages and four deliveries: the placeholder, and one page per stage, each
+// judged delivered only while its own stage is current.
 
 import { ATTO, type DeliveryVerdict, type Holder, type MessageVerdict, type PressVerdict } from "./rules.ts";
 
@@ -39,11 +45,30 @@ const CAFE_BRIEF =
 const BIKE_BRIEF =
   "A 100-word About us paragraph for the website of Spokes & Sprockets, a small bike repair shop. Warm, plain English, one paragraph. Say how many years the shop has been open.";
 
-/** The four demo jobs, by key. */
-export type JobKey = "mug" | "bakery" | "cafe" | "bike";
+/** The four demo jobs, by key, and the three-stage job of the staged studio. */
+export type JobKey = "mug" | "bakery" | "cafe" | "bike" | "staged";
 export const JOB_KEYS: JobKey[] = ["mug", "bakery", "cafe", "bike"];
 
-export type DraftKey = "placeholder" | "outline" | "wrong" | "final" | "revised";
+export type DraftKey = "placeholder" | "outline" | "wrong" | "final" | "revised" | "first_draft";
+
+// ---- the three-stage demo studio -------------------------------------------------------------------
+
+export const STAGED_STUDIO_NAME = "Fernhill Pottery, in stages";
+export const STAGED_ABOUT = "The stoneware mug description, paid in three stages: an outline, a first draft, then the finished piece.";
+
+/** The staged studio's terms: 0.5 GEN; the maker 30 minutes, the client 20, over all three stages; the same cut as the demo studio. */
+export const STAGED_TERMS = {
+  feeAtto: ATTO / 2n,
+  makerSeconds: 1800,
+  clientSeconds: 1200,
+  stepSeconds: 120,
+  cutBps: 1000,
+  maxCutBps: 5000,
+};
+
+/** open_studio's ninth argument for the staged studio: the three stages the on-chain run measures, word for word. */
+export const DEMO_STAGES =
+  "Outline=2000=a list of the points the description will make|First draft=3000=the description in full sentences, care notes may still be missing|Final=5000=the finished description";
 
 export type Draft = {
   /** the demo job whose brief the page answers (or, for the wrong piece, fails) */
@@ -52,8 +77,10 @@ export type Draft = {
   file: string;
   /** what the page is, in a few words */
   says: string;
-  /** what the network should agree it is, against its job's brief */
+  /** what the network should agree it is, against its job's brief (a staged page: at its own stage) */
   expect: DeliveryVerdict;
+  /** a staged page: the stage it stands for (1 to 3), 0 for a page that stands for none */
+  stage?: number;
   /**
    * The demo build's fingerprint of the page: the first 16 hex characters of the sha256 of its text
    * with the spacing collapsed (tests/unit/demo.test.mjs recomputes it from drafts/). On chain every
@@ -89,8 +116,25 @@ export const DRAFTS: Draft[] = [
   { job: "bike", key: "revised", file: "bike-revised.html", says: "the paragraph with a wheelchairs and prams line", expect: "delivered", fp: "7186ed3703cbd05a" },
 ];
 
+/**
+ * The staged studio's four pages: the mug's placeholder, outline and finished description, and its first
+ * draft. Each is judged delivered only while its own stage is current: a different stage is missing.
+ */
+export const STAGED_DRAFTS: Draft[] = [
+  { job: "staged", key: "placeholder", file: "mug-placeholder.html", says: '"Draft coming soon."', expect: "missing", fp: "73903527c1f6a2b7", stage: 0 },
+  { job: "staged", key: "outline", file: "mug-outline.html", says: "the outline in six bullet points", expect: "delivered", fp: "79e04b63ff3c8d09", stage: 1 },
+  { job: "staged", key: "first_draft", file: "mug-first-draft.html", says: "the first draft, the care line still to come", expect: "delivered", fp: "c958bea407b8daca", stage: 2 },
+  { job: "staged", key: "final", file: "mug-final.html", says: "the finished mug description", expect: "delivered", fp: "b9d43c8d6508c6f2", stage: 3 },
+];
+
+/** Every page in drafts/, once each. */
+export const ALL_DRAFT_FILES: string[] = [...new Set([...DRAFTS, ...STAGED_DRAFTS].map((d) => d.file))];
+
 /** One job's draft by its key. */
-export const draftOf = (key: DraftKey, job: JobKey): Draft => DRAFTS.find((d) => d.job === job && d.key === key)!;
+export const draftOf = (key: DraftKey, job: JobKey): Draft => (job === "staged" ? STAGED_DRAFTS : DRAFTS).find((d) => d.job === job && d.key === key)!;
+
+/** What the network should agree a staged page is while stage `stage` is current: delivered only at its own stage. */
+export const stagedVerdict = (d: Draft, stage: number): DeliveryVerdict => (d.stage && d.stage === stage ? "delivered" : "missing");
 
 /** "owner/name" from a GitHub repository URL; "" when it is not one. */
 export function repoOf(url: string): string {
@@ -108,15 +152,21 @@ export const draftUrl = (repo: string, commit: string, file: string): string => 
 export function draftOfUrl(url: string): Draft | null {
   const m = /\/drafts\/([a-z0-9-]+\.html)$/.exec(String(url ?? ""));
   if (!m) return null;
-  return DRAFTS.find((d) => d.file === m[1]) ?? null;
+  return DRAFTS.find((d) => d.file === m[1]) ?? STAGED_DRAFTS.find((d) => d.file === m[1]) ?? null;
 }
 
 // ---- the demo maker's fixed scripts, one per job --------------------------------------------------
 
 export type ActionKey = "question" | "sham" | "update" | DraftKey;
 
-/** The same eight keys in every job, in this order: the act route takes one of them and nothing else. */
+/** The same eight keys in every one-stage job, in this order. */
 export const ACTION_KEYS: ActionKey[] = ["question", "sham", "update", "placeholder", "outline", "wrong", "final", "revised"];
+
+/** The staged job's seven keys, in this order. */
+export const STAGED_ACTION_KEYS: ActionKey[] = ["question", "sham", "update", "placeholder", "outline", "first_draft", "final"];
+
+/** Every key the act route takes, and nothing else. */
+export const ALL_ACTION_KEYS: ActionKey[] = [...new Set([...ACTION_KEYS, ...STAGED_ACTION_KEYS])];
 
 export type DemoAction = {
   job: JobKey;
@@ -357,58 +407,103 @@ export const DEMO_JOBS: DemoJob[] = [
   },
 ];
 
-export const jobOf = (key: JobKey): DemoJob => DEMO_JOBS.find((j) => j.key === key)!;
+/** The staged studio's script: the mug's three messages, then the placeholder and one page per stage. */
+const STAGED_ACTIONS: DemoAction[] = [
+  { ...MUG_ACTIONS[0], job: "staged" },
+  { ...MUG_ACTIONS[1], job: "staged" },
+  { ...MUG_ACTIONS[2], job: "staged" },
+  { job: "staged", key: "placeholder", kind: "deliver", draft: "placeholder", label: "Deliver a placeholder page", text: "Stage draft.", expect: "missing", why: "the page only says a draft is coming, at any stage" },
+  { job: "staged", key: "outline", kind: "deliver", draft: "outline", label: "Deliver the outline (stage 1)", text: "The outline.", expect: "delivered", why: "six bullet points: the Outline stage's piece, and only that stage's" },
+  { job: "staged", key: "first_draft", kind: "deliver", draft: "first_draft", label: "Deliver the first draft (stage 2)", text: "The first draft.", expect: "delivered", why: "the description in full sentences, the care line still to come: the First draft stage's piece" },
+  { job: "staged", key: "final", kind: "deliver", draft: "final", label: "Deliver the finished description (stage 3)", text: "The finished description.", expect: "delivered", why: "the whole mug description: the Final stage's piece" },
+];
+
+/** The three-stage job of the staged studio: the mug brief, word for word, paid Outline, First draft, Final. */
+export const STAGED_JOB: DemoJob = {
+  key: "staged",
+  title: "The stoneware mug, in three stages",
+  brief: DEMO_BRIEF,
+  open: "which glaze the listing is for",
+  stated: "plain English",
+  drafts: STAGED_DRAFTS,
+  actions: STAGED_ACTIONS,
+  lines: DEMO_JOBS[0].lines,
+};
+
+export const jobOf = (key: JobKey): DemoJob => (key === "staged" ? STAGED_JOB : DEMO_JOBS.find((j) => j.key === key)!);
 
 /** The demo job a brief is, compared word for word as the contract stored it; null for any other brief. */
 export const jobOfBrief = (brief: string): DemoJob | null => DEMO_JOBS.find((j) => j.brief === brief) ?? null;
 
-export const isActionKey = (what: string): what is ActionKey => (ACTION_KEYS as string[]).includes(what);
+export const isActionKey = (what: string): what is ActionKey => (ALL_ACTION_KEYS as string[]).includes(what);
 
 /** One job's move by its key; null for anything that is not one of the eight keys. */
 export const actionOf = (key: string, job: JobKey): DemoAction | null => jobOf(job).actions.find((a) => a.key === key) ?? null;
 
+/** The staged studio's job for a brief, word for word: the mug brief only; null for any other. */
+export const stagedJobOfBrief = (brief: string): DemoJob | null => (brief === STAGED_JOB.brief ? STAGED_JOB : null);
+
+/** The demo job of a commission: on the staged studio the staged job, on the demo studio the job its brief is; null otherwise. */
+export function demoJobOf(c: { studio: string; brief: string }, studios: DemoStudios): DemoJob | null {
+  if (studios.staged && c.studio === studios.staged) return stagedJobOfBrief(c.brief);
+  if (studios.studio && c.studio === studios.studio) return jobOfBrief(c.brief);
+  return null;
+}
+
 /** The move the demo maker makes for a key on a commission with this brief; null when the brief is not a demo job's. */
-export function demoActionFor(brief: string, key: string): DemoAction | null {
-  const job = jobOfBrief(brief);
+export function demoActionFor(brief: string, key: string, staged = false): DemoAction | null {
+  const job = staged ? stagedJobOfBrief(brief) : jobOfBrief(brief);
   return job ? actionOf(key, job.key) : null;
 }
 
-/** What the network should reach for one action given who holds the move now; noted for a message while the client holds it. */
-export function expectedVerdict(a: DemoAction, holder: Holder): MessageVerdict {
+/**
+ * What the network should reach for one action given who holds the move now and which stage is current;
+ * noted for a message while the client holds it. A staged page is delivered only at its own stage.
+ */
+export function expectedVerdict(a: DemoAction, holder: Holder, stage = 1): MessageVerdict {
   if (a.kind === "say" && holder !== "maker") return "noted";
+  if (a.kind === "deliver" && a.job === "staged") return stagedVerdict(draftOf(a.draft!, "staged"), stage);
   return a.expect;
 }
 
 /** Where the move should be after the action, given who holds it now. */
-export function expectedHolder(a: DemoAction, holder: Holder): Holder {
-  const v = expectedVerdict(a, holder);
+export function expectedHolder(a: DemoAction, holder: Holder, stage = 1): Holder {
+  const v = expectedVerdict(a, holder, stage);
   if (holder === "maker" && (v === "pass" || v === "delivered")) return "client";
   return holder;
 }
 
-/** True when a studio is the demo studio: its maker is the demo key's address and its name is the demo name. */
+/** True when a studio is one of the demo studios: its maker is the demo key's address and its name is a demo name. */
 export function isDemoStudio(studio: { maker: string; name: string }, demoMaker: string): boolean {
-  return !!demoMaker && studio.maker.toLowerCase() === demoMaker.toLowerCase() && studio.name === DEMO_STUDIO_NAME;
+  return !!demoMaker && studio.maker.toLowerCase() === demoMaker.toLowerCase() && (studio.name === DEMO_STUDIO_NAME || studio.name === STAGED_STUDIO_NAME);
 }
 
 /** Why the demo maker does nothing on a commission of its studio whose brief is not one of its jobs. */
-export function offScript(id: string, accept: boolean): string {
-  const why = `${id}'s brief is not one of the ${DEMO_JOBS.length} demo briefs word for word, so the demo maker has no script and no drafts for it`;
+export function offScript(id: string, accept: boolean, staged = false): string {
+  const why = staged
+    ? `${id}'s brief is not the staged studio's demo brief word for word, so the demo maker has no script and no drafts for it`
+    : `${id}'s brief is not one of the ${DEMO_JOBS.length} demo briefs word for word, so the demo maker has no script and no drafts for it`;
   return accept ? `${why} and does not accept it; withdrawing it returns the whole fee` : why;
 }
+
+/** The two demo studios on this contract: "" for one that is not open. */
+export type DemoStudios = { studio: string; staged: string };
 
 /**
  * Why the demo maker will not act on this commission now, in words a visitor can act on; "" when it
  * will. `what` is "accept" or one of the eight action keys; the job is the commission's brief, word
  * for word. The server asks this of a fresh read before it signs, and so does the mock.
  */
-export function demoActProblem(c: { id: string; studio: string; status: string; brief: string } | null, demoStudio: string, what: string, drafts: boolean): string {
-  if (!demoStudio) return "the demo studio is not open on this contract yet";
+export function demoActProblem(c: { id: string; studio: string; status: string; brief: string } | null, demo: string | DemoStudios, what: string, drafts: boolean): string {
+  const studios: DemoStudios = typeof demo === "string" ? { studio: demo, staged: "" } : demo;
+  if (!studios.studio && !studios.staged) return "the demo studio is not open on this contract yet";
   if (what !== "accept" && !isActionKey(what)) return "the demo maker does only what its buttons say";
   if (!c) return "there is no such commission";
-  if (c.studio !== demoStudio) return `${c.id} is not a commission of the demo studio; only its own maker acts on it`;
-  const job = jobOfBrief(c.brief);
-  if (!job) return offScript(c.id, what === "accept");
+  const staged = !!studios.staged && c.studio === studios.staged;
+  if (!staged && c.studio !== studios.studio) return `${c.id} is not a commission of the demo studio; only its own maker acts on it`;
+  const job = demoJobOf(c, studios);
+  if (!job) return offScript(c.id, what === "accept", staged);
+  if (what !== "accept" && !actionOf(what, job.key)) return "the demo maker does only what its buttons say";
   if (what === "accept") {
     if (c.status !== "requested") return `${c.id} is ${c.status}; the demo maker accepts only a request`;
     return "";
@@ -444,9 +539,15 @@ export function scriptedPress(text: string, brief = ""): PressVerdict {
  * job's commission another job's page is about something else and is read as missing; any other
  * address cannot be fetched and stores nothing.
  */
-export function scriptedDelivery(url: string, brief = ""): { verdict: DeliveryVerdict; fp: string } | { error: string } {
+export function scriptedDelivery(url: string, brief = "", stage = 0): { verdict: DeliveryVerdict; fp: string } | { error: string } {
   const d = draftOfUrl(url);
   if (!d) return { error: FETCH_FAILED };
+  if (stage > 0) {
+    // A commission of two stages or more is judged against its current stage: the staged studio's pages
+    // are delivered only at their own stage, and any other page is a different piece.
+    const own = brief === STAGED_JOB.brief ? STAGED_DRAFTS.find((x) => x.file === d.file) : undefined;
+    return { verdict: own ? stagedVerdict(own, stage) : "missing", fp: d.fp };
+  }
   const job = jobOfBrief(brief);
   return { verdict: job && d.job !== job.key ? "missing" : d.expect, fp: d.fp };
 }

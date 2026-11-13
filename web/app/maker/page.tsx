@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { Field, Section } from "@/components/bits";
 import { Plunger } from "@/components/button";
 import { ChessClock } from "@/components/chess-clock";
+import { StageEditor } from "@/components/stages";
 import { CommissionRow } from "@/components/commission-row";
 import { Placeholder, ReadError } from "@/components/read-state";
 import { Suggest } from "@/components/suggest";
@@ -25,6 +26,8 @@ import { durationLabel, gen, genText, pct, tryAtto } from "@/lib/format";
 import { sendingGuide, signGuide } from "@/lib/guide";
 import { MAX_ABOUT, MAX_NAME, MAX_TO_CAP, aboutProblem, nameProblem, plain, termsOfProblem } from "@/lib/rules";
 import { ABOUT_CHIPS, CAP_CHIPS, CLIENT_SECONDS_CHIPS, CUT_CHIPS, FEE_CHIPS, MAKER_SECONDS_CHIPS, NAME_CHIPS, STEP_CHIPS, TERMS_CHIPS } from "@/lib/suggestions";
+import { previewStages, type StageDraft } from "@/lib/stages";
+import { APPEAL_WINDOW } from "@/lib/rules";
 import { rememberTx } from "@/lib/tx-memory";
 import type { TxStatus } from "@/lib/types";
 
@@ -40,6 +43,7 @@ function OpenStudio() {
   const [step, setStep] = React.useState(900);
   const [cut, setCut] = React.useState(500);
   const [cap, setCap] = React.useState(4000);
+  const [stages, setStages] = React.useState<StageDraft[]>([]);
   const [tried, setTried] = React.useState(false);
   const tx = useTx((s: TxStatus, hash: string) => {
     const id = openedStudio(s);
@@ -55,7 +59,8 @@ function OpenStudio() {
   const nameP = nameProblem(n);
   const aboutP = aboutProblem(a);
   const termsP = feeAtto === null ? "the fee is an amount of GEN like 0.5 or 2" : termsOfProblem(terms);
-  const ok = !nameP && !aboutP && !termsP;
+  const staged = previewStages(stages, feeAtto);
+  const ok = !nameP && !aboutP && !termsP && !staged.problem;
   const num = (v: string) => (/^\d{1,9}$/.test(v.trim()) ? Number(v.trim()) : 0);
 
   return (
@@ -65,7 +70,7 @@ function OpenStudio() {
         e.preventDefault();
         setTried(true);
         if (!ok || feeAtto === null) return;
-        void tx.start(calls.openStudio(n, a, feeAtto, maker, client, step, cut, cap));
+        void tx.start(calls.openStudio(n, a, feeAtto, maker, client, step, cut, cap, staged.arg));
       }}
     >
       <Field id="name" label="Studio name" count={`${[...n].length}/${MAX_NAME}`} error={tried ? sentence(nameP) : ""}>
@@ -128,6 +133,7 @@ function OpenStudio() {
           </>
         )}
       </p>
+      <StageEditor rows={stages} onChange={setStages} feeAtto={feeAtto} />
       <WalletGate what="to open a studio">
         <Plunger type="submit" disabled={tx.sending || (!!tx.hash && !tx.final)} label="Press: open the studio, terms fixed for good" glyph={<span className="mono text-[12px]">OPEN</span>} />
       </WalletGate>
@@ -179,6 +185,22 @@ export default function MakerPage() {
           Open a studio with a fee and the terms of its clock. Clients commission it with exactly the fee, which the contract holds; you accept, and from then on the clock runs
           only while the move is yours.
         </p>
+        <div className="mt-4 grid max-w-[72ch] gap-3 sm:grid-cols-2">
+          <div className="sheet px-4 py-3">
+            <p className="kicker text-ink-3">Stages</p>
+            <p className="mt-1 text-[14px] text-ink-2">
+              Split the fee into up to four named stages, say an outline, a draft and the final. You deliver each stage&apos;s page in turn; the validators judge it against
+              that stage only, and the moment the client accepts a stage its share is paid to you, less any late cut on that share alone. One stage is the whole fee at the end.
+            </p>
+          </div>
+          <div className="sheet px-4 py-3">
+            <p className="kicker text-ink-3">The bonded appeal</p>
+            <p className="mt-1 text-[14px] text-ink-2">
+              When a verdict goes against you, you have {APPEAL_WINDOW / 60} minutes to appeal it once: write one reason and put up 0.1 GEN of your credit as a bond. The
+              validators judge the same question again with your reason and the client&apos;s last message. Changed, you keep the bond; the same, it goes to the client.
+            </p>
+          </div>
+        </div>
       </div>
 
       {newcomer && openSection}

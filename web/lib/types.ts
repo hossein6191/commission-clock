@@ -3,7 +3,11 @@
 // both modes. Every instant is seconds on the message clock; 0 until it happens. Every amount is a
 // decimal string of atto.
 
-import type { CommissionStatus, Holder, MessageKind, MessageVerdict, Side } from "./rules.ts";
+import type { AppealWord, CommissionStatus, Holder, MessageKind, MessageVerdict, Side } from "./rules.ts";
+import type { VerdictView } from "./appeal.ts";
+import type { StageView } from "./stages.ts";
+
+export type { StageView, VerdictView };
 
 /** The record a studio carries on the contract: counts of what happened to its commissions. */
 export type StudioRecord = {
@@ -22,6 +26,10 @@ export type StudioRecord = {
   delivered: number;
   missing: number;
   lateSeconds: number;
+  /** stages accepted and paid before a commission's last */
+  stagesReleased: number;
+  appeals: number;
+  overturned: number;
 };
 
 /** studio(id): a maker's terms, fixed for good, and its public record. */
@@ -41,6 +49,8 @@ export type Studio = {
   accepting: boolean;
   openedAt: number;
   record: StudioRecord;
+  /** its stages, 1 to 4; a studio that declared none has one, "The work", the whole fee */
+  stages: StageView[];
 };
 
 /** commission(id): one commission, its terms (copied from the studio), its clock and its settlement. */
@@ -80,6 +90,16 @@ export type Commission = {
   makerPaidAtto: string;
   clientPaidAtto: string;
   heldAtto: string;
+  /** the current stage, 1 to nStages */
+  stage: number;
+  nStages: number;
+  stages: StageView[];
+  /** the latest judged press and the latest judged delivery, with who may appeal them and until when */
+  lastPress: VerdictView | null;
+  lastDelivery: VerdictView | null;
+  appeals: number;
+  appealWindow: number;
+  appealBondAtto: string;
   /** the view's own clock when it was read; 0 when the read had none */
   now: number;
   /** the browser's clock (the mock's, in mock mode) when the row was read: with `now`, the skew a live face ticks with */
@@ -103,6 +123,16 @@ export type Message = {
   verdict: MessageVerdict;
   fp: string;
   at: number;
+  /** the stage that was current */
+  stage: number;
+  /** who held the move just before it */
+  before: Holder;
+  /** the first verdict, once an appeal replaced it; "" otherwise */
+  was: string;
+  appeal: AppealWord;
+  appealRole: Side | "";
+  appealReason: string;
+  appealAt: number;
 };
 
 export type Paged<T> = { total: number; offset: number; limit: number; rows: T[] };
@@ -135,7 +165,15 @@ export type Stats = {
   toClientsAtto: string;
   refusedPayments: number;
   returnedAtto: string;
+  stagesReleased: number;
+  appeals: number;
+  overturned: number;
+  upheld: number;
+  creditAtto: string;
 };
+
+/** credit_of(address): the credit an address holds for appeal bonds, and the bond one appeal puts up. */
+export type Credit = { address: string; creditAtto: string; bondAtto: string };
 
 /** rules(): the contract's own words, kept as it wrote them. */
 export type Rules = Record<string, unknown>;
@@ -172,9 +210,13 @@ export type WriteFn =
   | "say"
   | "deliver"
   | "take_move"
+  | "accept_stage"
   | "accept_work"
   | "claim_silence"
-  | "cancel_late";
+  | "cancel_late"
+  | "appeal"
+  | "deposit"
+  | "withdraw";
 
 export type Arg = string | number;
 
@@ -185,7 +227,17 @@ export type Call = { fn: WriteFn; args: Arg[]; value?: bigint };
  * Whether the demo maker can act now, whose it is, which studio it runs, and exactly why not. `drafts`
  * says whether it can deliver: the drafts are pinned to a commit of a known repository.
  */
-export type DemoStatus = { online: boolean; maker: string; studio: string; reason: string; drafts: boolean; draftsReason: string };
+export type DemoStatus = {
+  online: boolean;
+  maker: string;
+  /** the one-stage demo studio, "" while it is not open */
+  studio: string;
+  /** the three-stage demo studio, "" while it is not open */
+  staged: string;
+  reason: string;
+  drafts: boolean;
+  draftsReason: string;
+};
 
 /** What the demo maker answered when asked to act: a transaction hash, or why not. */
 export type DemoAnswer = { ok: true; hash: string } | { ok: false; reason: string; retryAfter?: number };

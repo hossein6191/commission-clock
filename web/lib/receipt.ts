@@ -15,6 +15,8 @@ export function stampOf(m: { kind: MessageKind; verdict: MessageVerdict; role: S
   const mine = viewer === m.role;
   const to: Side = m.role === "maker" ? "client" : "maker";
   const still = mine ? "still your move" : `still the ${m.role}'s move`;
+  if (m.kind === "stage")
+    return { text: "STAGE ACCEPTED - share paid", tone: "delivered", meaning: "The client accepted this stage: its share was paid at once, less any late cut, and the next stage started with the move on the maker." };
   if (m.kind === "take") return { text: "TOOK THE MOVE", tone: "taken", meaning: `The ${m.role} took the move onto itself; its own clock runs from this message.` };
   if (m.kind === "deliver") {
     if (m.verdict === "delivered")

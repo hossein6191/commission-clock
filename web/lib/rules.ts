@@ -42,6 +42,18 @@ export const FP_CHARS = 16;
 export const PAGE = 20;
 export const ID_CHARS = 16;
 export const ADDRESS_CHARS = 42;
+export const MAX_STAGES = 4;
+export const MIN_STAGE_BPS = 100;
+export const MAX_STAGE_NAME = 40;
+export const MAX_STAGE_ABOUT = 200;
+export const MAX_STAGES_ARG = MAX_STAGES * (MAX_STAGE_NAME + MAX_STAGE_ABOUT + 8);
+export const STAGE_SEP = "|";
+export const FIELD_SEP = "=";
+export const ONE_STAGE = "The work";
+export const APPEAL_WINDOW = 600;
+export const APPEAL_BOND = ATTO / 10n;
+export const MIN_REASON = 1;
+export const MAX_REASON = 300;
 
 export const SCHEME = "https://";
 export const URL_SIGNS = ["-", ".", "_", "~", "/", "?", "&", "=", "%", "+", ":", "@"];
@@ -80,14 +92,19 @@ export type Side = "maker" | "client";
 export type Holder = Side | "";
 export type PressVerdict = "pass" | "keep" | "unclear";
 export type DeliveryVerdict = "delivered" | "missing" | "unclear";
-export type MessageVerdict = "noted" | "pass" | "keep" | "unclear" | "delivered" | "missing" | "taken";
-export type MessageKind = "say" | "deliver" | "take";
+export type MessageVerdict = "noted" | "pass" | "keep" | "unclear" | "delivered" | "missing" | "taken" | "accepted";
+export type MessageKind = "say" | "deliver" | "take" | "stage";
+/** What an appeal came to: a verdict word, or "changed" when a delivered page no longer reads as it did. */
+export type AppealWord = "" | "pass" | "keep" | "unclear" | "delivered" | "missing" | "changed";
+/** pending, current, accepted; or the commission's final status; or closed (a later stage of one that ended first) */
+export type StageStatus = string;
 export type CommissionStatus = "requested" | "active" | "accepted" | "accepted_by_silence" | "lapsed" | "cancelled_late" | "withdrawn" | "declined";
 
 export const PRESS_WORDS: PressVerdict[] = ["pass", "keep", "unclear"];
 export const DELIVERY_WORDS: DeliveryVerdict[] = ["delivered", "missing", "unclear"];
-export const MESSAGE_VERDICTS: MessageVerdict[] = ["noted", "pass", "keep", "unclear", "delivered", "missing", "taken"];
-export const MESSAGE_KINDS: MessageKind[] = ["say", "deliver", "take"];
+export const MESSAGE_VERDICTS: MessageVerdict[] = ["noted", "pass", "keep", "unclear", "delivered", "missing", "taken", "accepted"];
+export const MESSAGE_KINDS: MessageKind[] = ["say", "deliver", "take", "stage"];
+export const APPEAL_WORDS: AppealWord[] = ["pass", "keep", "unclear", "delivered", "missing", "changed"];
 export const STATUSES: CommissionStatus[] = ["requested", "active", "accepted", "accepted_by_silence", "lapsed", "cancelled_late", "withdrawn", "declined"];
 /** The statuses a commission ends in: the fee has been paid out. */
 export const SETTLED: CommissionStatus[] = ["accepted", "accepted_by_silence", "lapsed", "cancelled_late", "withdrawn", "declined"];
@@ -194,6 +211,43 @@ export const briefProblem = (brief: string): string => textProblem(pyStrip(brief
 
 /** say's check of a message, after the strip. */
 export const messageProblem = (text: string): string => textProblem(pyStrip(text), MIN_TEXT, MAX_TEXT, "a message");
+
+/** appeal's check of the reason, after the strip. */
+export const reasonProblem = (reason: string): string => textProblem(pyStrip(reason), MIN_REASON, MAX_REASON, "an appeal's reason");
+
+/** ASCII digits only, at least one: the contract's _digits. */
+const digitsOnly = (t: string): boolean => /^[0-9]+$/.test(t);
+
+export type StagePart = { name: string; about: string; bps: number };
+
+/**
+ * The contract's _stages_of: a studio's stages as (name, what it holds, share in basis points), and "" or
+ * why they are refused. "" is one stage, the whole fee. open_studio strips the whole argument first.
+ */
+export function stagesOf(raw: string): { stages: StagePart[]; problem: string } {
+  if (raw === "") return { stages: [{ name: ONE_STAGE, about: "", bps: BPS }], problem: "" };
+  const n = [...raw].length;
+  if (n > MAX_STAGES_ARG) return { stages: [], problem: "the stages are at most " + MAX_STAGES_ARG + " characters; these are " + n };
+  const parts = raw.split(STAGE_SEP);
+  if (parts.length > MAX_STAGES) return { stages: [], problem: "a studio has 1 to " + MAX_STAGES + " stages; these are " + parts.length };
+  const out: StagePart[] = [];
+  let total = 0;
+  for (const part of parts.slice(0, MAX_STAGES)) {
+    const fields = part.split(FIELD_SEP);
+    if (fields.length < 2 || fields.length > 3) return { stages: [], problem: "each stage is name=share or name=share=what it holds, separated by |" };
+    const name = pyStrip(fields[0]);
+    const share = pyStrip(fields[1]);
+    const about = fields.length === 3 ? pyStrip(fields[2]) : "";
+    const problem = textProblem(name, MIN_NAME, MAX_STAGE_NAME, "a stage's name") || textProblem(about, 0, MAX_STAGE_ABOUT, "what a stage holds");
+    if (problem) return { stages: [], problem };
+    const bps = share.length <= 5 && digitsOnly(share) ? Number(share) : -1;
+    if (bps < MIN_STAGE_BPS || bps > BPS) return { stages: [], problem: "a stage's share is a whole number of basis points from " + MIN_STAGE_BPS + " to " + BPS };
+    total += bps;
+    out.push({ name, about, bps });
+  }
+  if (total !== BPS) return { stages: [], problem: "the stages' shares add up to " + BPS + " basis points; these add up to " + total };
+  return { stages: out, problem: "" };
+}
 
 /** deliver's checks of the page address and the note, after the strip. */
 export const deliveryProblem = (url: string, note: string): string => urlProblem(pyStrip(url)) || textProblem(pyStrip(note), 0, MAX_NOTE, "the note");

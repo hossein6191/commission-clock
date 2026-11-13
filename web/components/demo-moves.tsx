@@ -19,8 +19,13 @@ export function DemoMoves({
   drafts,
   draftsReason,
   onAct,
+  stage = 1,
+  stageName = "",
 }: {
   job: DemoJob;
+  /** the current stage of a staged commission (1 on one stage) */
+  stage?: number;
+  stageName?: string;
   holder: Holder;
   busy: boolean;
   drafts: boolean;
@@ -39,7 +44,8 @@ export function DemoMoves({
       </h2>
       <p className="mt-1 max-w-[62ch] text-[14px] text-ink-2">
         The demo job: <strong className="font-semibold text-ink">{job.title}</strong>. You play the client. Press one of these and the demo maker makes that move on chain,
-        from its own key; next to each is what the network should agree, given that the move is now {holder ? `the ${holder}'s` : "nobody's"}.
+        from its own key; next to each is what the network should agree, given that the move is now {holder ? `the ${holder}'s` : "nobody's"}
+        {stageName ? ` and stage ${stage} (${stageName}) is current: each page is read as delivered only at its own stage` : ""}.
       </p>
       {groups.map((g) => (
         <div key={g.kind} className="mt-4">
@@ -47,8 +53,8 @@ export function DemoMoves({
           {g.kind === "deliver" && !drafts && <p className="mt-1 text-[13px] text-amber-ink">Not available yet: {draftsReason}.</p>}
           <ul className="mt-1.5 flex flex-col gap-2">
             {job.actions.filter((a) => a.kind === g.kind).map((a) => {
-              const verdict = expectedVerdict(a, holder);
-              const after = expectedHolder(a, holder);
+              const verdict = expectedVerdict(a, holder, stage);
+              const after = expectedHolder(a, holder, stage);
               const stamp = stampOf({ kind: a.kind, verdict, role: "maker", fp: "" }, "visitor");
               const disabled = busy || (a.kind === "deliver" && !drafts);
               return (

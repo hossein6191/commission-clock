@@ -13,7 +13,7 @@
 
 import { acceptSplit, cancelOpensIn, graceLeft, lateTerms, live, silenceOpensIn, type ClockState } from "./clock.ts";
 import { clockTime, gen, pct, span } from "./format.ts";
-import { ACCEPT_WINDOW, KILL_BPS, TURN_GRACE, TURN_NOTICE, type CommissionStatus, type Holder, type Side } from "./rules.ts";
+import { ACCEPT_WINDOW, APPEAL_BOND, APPEAL_WINDOW, KILL_BPS, TURN_GRACE, TURN_NOTICE, type CommissionStatus, type Holder, type Side } from "./rules.ts";
 import type { WriteFn } from "./types.ts";
 
 /** Who is looking: the client of the commission, its maker, or anyone else. */
@@ -105,7 +105,19 @@ export type SignInput = {
   holder?: Holder;
   role?: Role;
   mock?: boolean;
+  /** accept_stage: the stage being accepted, and whether it is the last */
+  stage?: StageInfo;
+  /** what the contract still holds of the fee (staged commissions) */
+  heldAtto?: string;
+  /** deposit and withdraw: the amount */
+  amountAtto?: string;
 };
+
+/** A stage, for the waiting copy: its number of how many, its name. */
+export type StageInfo = { k: number; n: number; name: string };
+
+const stageName = (s: StageInfo): string => `stage ${s.k} of ${s.n} (${s.name})`;
+const BOND = gen(APPEAL_BOND);
 
 /** Where the money is while a signature is waiting: nothing has moved yet. */
 function moneyBeforeSigning(s: SignInput): string {
@@ -126,7 +138,16 @@ function moneyBeforeSigning(s: SignInput): string {
     case "take_move":
       return `No GEN moves with this. The ${fee} fee stays held by the contract until the commission settles.`;
     case "accept_work":
-      return `From the ${fee} the contract holds: ${toMaker} to the maker and ${toClient} back to you, in the same transaction.`;
+    case "accept_stage":
+      if (s.stage && s.stage.k < s.stage.n)
+        return `From the ${gen(s.heldAtto ?? s.feeAtto ?? "0")} the contract still holds: ${toMaker} to the maker and ${toClient} back to you for ${stageName(s.stage)}, in the same transaction. The rest stays held for the stages after it.`;
+      return `From the ${s.stage && s.stage.n > 1 ? gen(s.heldAtto ?? "0") + " the contract still holds" : fee + " the contract holds"}: ${toMaker} to the maker and ${toClient} back to you, in the same transaction.`;
+    case "appeal":
+      return `No GEN leaves your wallet: ${BOND} of your credit on the contract is put up as the bond. If the verdict changes it stays yours; if not, it goes to the other side's credit. The ${fee} fee stays held by the contract.`;
+    case "deposit":
+      return `${gen(s.amountAtto ?? "0")} goes from your wallet to your credit on the contract once you confirm. It belongs to you, not to any commission, and you can withdraw it at any time.`;
+    case "withdraw":
+      return `${gen(s.amountAtto ?? "0")} of your credit on the contract comes back to your wallet in the same transaction.`;
     case "claim_silence":
       return `From the ${fee} the contract holds: ${toMaker} to you and ${toClient} to the client, in the same transaction.`;
     case "cancel_late":
@@ -151,6 +172,14 @@ function clockBeforeSigning(s: SignInput): string {
       return NO_CLOCK;
     case "accept":
       return "Once this lands the clock starts, with the move on you.";
+    case "deposit":
+    case "withdraw":
+      return "No clock is touched: credit belongs to you, not to any commission.";
+    case "appeal":
+      return `${runsAgainst(s.holder ?? "", role)} It keeps running while the validators judge; a changed verdict moves the move as of the verdict's own time, the seconds in between charged to nobody.`;
+    case "accept_stage":
+      if (s.stage && s.stage.k < s.stage.n) return `${runsAgainst(s.holder ?? "", role)} Once this lands stage ${s.stage.k + 1} starts with the move on the maker, its first ${TURN_GRACE / 60} minutes not charged.`;
+      return `${runsAgainst(s.holder ?? "", role)} It stops for good once this lands.`;
     case "accept_work":
     case "claim_silence":
     case "cancel_late":
@@ -196,7 +225,7 @@ export function signGuide(s: SignInput): Guide {
 // ---- a plain transaction on its way ---------------------------------------------------------------------
 
 export type SendingInput = {
-  fn: Exclude<WriteFn, "say" | "deliver">;
+  fn: Exclude<WriteFn, "say" | "deliver" | "appeal">;
   /** "S2" or "C7": what the call is about */
   target: string;
   /** a studio's name */
@@ -207,6 +236,9 @@ export type SendingInput = {
   holder?: Holder;
   role?: Role;
   mock?: boolean;
+  stage?: StageInfo;
+  heldAtto?: string;
+  amountAtto?: string;
 };
 
 /** Every call the validators do not judge with a model: sent, not final yet. */
@@ -239,17 +271,32 @@ export function sendingGuide(s: SendingInput): Guide {
       return make({ ...base, id: "accept", now: `Accepting ${s.target}: the clock starts with the move on the maker`, clock: "From this transaction's own time the clock runs against the maker.", leave: lands("the acceptance"), money: `The client's ${fee} stays held by the contract until the commission settles.` });
     case "take_move":
       return make({ ...base, id: "take_move", now: `Taking the move on ${s.target}`, clock: `Once it lands the clock runs against ${role === "visitor" ? "the side that took it" : "you"}, from this transaction's own time.`, leave: lands("it"), money: `No GEN moves. The ${fee} fee stays held by the contract.` });
+    case "deposit":
+      return make({ ...base, id: "deposit", now: `Adding ${gen(s.amountAtto ?? "0")} to your credit`, clock: clockBeforeSigning({ fn: s.fn, label: "" }), leave: lands("the deposit"), money: `${gen(s.amountAtto ?? "0")} is on its way from your wallet to your credit on the contract, where an appeal can use it as its bond.` });
+    case "withdraw":
+      return make({ ...base, id: "withdraw", now: `Withdrawing ${gen(s.amountAtto ?? "0")} of your credit`, clock: clockBeforeSigning({ fn: s.fn, label: "" }), leave: lands("the withdrawal"), money: `${gen(s.amountAtto ?? "0")} is on its way from your credit on the contract back to your wallet.` });
+    case "accept_stage":
+      if (s.stage && s.stage.k < s.stage.n)
+        return make({
+          ...base,
+          id: "accept_stage",
+          now: `Accepting ${stageName(s.stage)} on ${s.target}: its share is being paid out`,
+          clock: `${runsAgainst(s.holder ?? "", role)} Once this lands stage ${s.stage.k + 1} starts with the move on the maker.`,
+          leave: lands("the payment"),
+          money: `From the ${gen(s.heldAtto ?? s.feeAtto ?? "0")} the contract still holds: about ${gen(s.toMakerAtto ?? "0")} to the maker and ${gen(s.toClientAtto ?? "0")} to the client, worked out on the transaction's own clock. The rest stays held.`,
+        });
+    // falls through: the last stage settles the commission
     case "accept_work":
     case "claim_silence":
     case "cancel_late": {
-      const what = s.fn === "accept_work" ? "Accepting the work" : s.fn === "claim_silence" ? "Claiming the client's silence" : "Cancelling late";
+      const what = s.fn === "accept_work" || s.fn === "accept_stage" ? "Accepting the work" : s.fn === "claim_silence" ? "Claiming the client's silence" : "Cancelling late";
       return make({
         ...base,
         id: s.fn,
         now: `${what} on ${s.target}: the fee is being paid out`,
         clock: `${runsAgainst(s.holder ?? "", role)} It stops for good once this lands.`,
         leave: lands("the settlement"),
-        money: `From the ${fee} the contract holds: about ${gen(s.toMakerAtto ?? "0")} to the maker and ${gen(s.toClientAtto ?? "0")} to the client, worked out on the transaction's own clock.`,
+        money: `From the ${s.heldAtto && s.stage && s.stage.n > 1 ? gen(s.heldAtto) + " the contract still holds" : fee + " the contract holds"}: about ${gen(s.toMakerAtto ?? "0")} to the maker and ${gen(s.toClientAtto ?? "0")} to the client, worked out on the transaction's own clock.`,
       });
     }
   }
@@ -359,6 +406,94 @@ export function readGuide(r: ReadInput): Guide {
   });
 }
 
+// ---- an appeal: the validators judge the same verdict once more --------------------------------------
+
+export type AppealInput = {
+  role: Role;
+  commission: string;
+  /** the side that appealed */
+  appellant: Side;
+  /** a press or a delivery */
+  kind: "say" | "deliver";
+  /** the verdict appealed */
+  verdict: string;
+  holder: Holder;
+  feeAtto: string;
+  stage: "busy" | "late";
+  mock?: boolean;
+};
+
+/** An appeal on its way: one consensus round, the same four askings, with the appellant's reason added. */
+export function appealGuide(a: AppealInput): Guide {
+  const late = a.stage === "late";
+  const mine = a.role === a.appellant;
+  const what = a.kind === "deliver" ? "delivery" : "message";
+  return make({
+    id: late ? "appeal-late" : "appeal",
+    tone: late ? "late" : "busy",
+    waitsFor: "validators",
+    now: late
+      ? `The validators are still judging ${mine ? "your" : `the ${a.appellant}'s`} appeal`
+      : `The validators are judging ${mine ? "your" : `the ${a.appellant}'s`} appeal: the ${what} that was judged ${a.verdict}, asked once more with the reason added`,
+    time: late
+      ? "Over 6 minutes so far. Studio is slow at times; the answer still lands here by itself. A round that cannot settle stores nothing, and the bond stays in the credit."
+      : a.kind === "deliver"
+        ? READING_TIME(a.mock)
+        : JUDGING_TIME(a.mock),
+    need: NOTHING_NEEDED,
+    clock: `${runsAgainst(a.holder, a.role)} If the verdict changes, the move goes where the new verdict puts it, as of the first verdict's own time; the seconds in between are charged to nobody.`,
+    leave: `${keep(a.commission, a.role)}; the answer lands whether or not this page is open. An appeal is final either way.`,
+    canLeave: true,
+    money: `The ${gen(a.feeAtto)} fee stays held by the contract: an appeal never moves it. The ${BOND} bond is in the ${a.appellant}'s credit; it stays there if the verdict changes, and goes to the ${a.appellant === "maker" ? "client" : "maker"}'s credit if not.`,
+  });
+}
+
+export type VerdictInput = {
+  role: Role;
+  commission: string;
+  /** "C4#3" */
+  message: string;
+  kind: "say" | "deliver";
+  verdict: string;
+  /** the side it went against, which alone may appeal */
+  appellant: Side;
+  /** the last second an appeal can be sent */
+  deadline: number;
+  now: number;
+  holder: Holder;
+  feeAtto: string;
+  /** the viewer's credit in atto, when known */
+  creditAtto?: string;
+};
+
+/** A judged verdict inside its appeal window: who may appeal it, until when, and what that would cost. */
+export function verdictGuide(v: VerdictInput): Guide {
+  const left = Math.max(0, v.deadline - v.now);
+  const mine = v.role === v.appellant;
+  const what = v.kind === "deliver" ? "delivery" : "message";
+  const until = clockTime(v.deadline, v.now);
+  const short = v.creditAtto !== undefined && BigInt(v.creditAtto || "0") < APPEAL_BOND;
+  return make({
+    id: mine ? "appeal-open" : "appeal-open-other",
+    tone: mine ? "ready" : "clock",
+    waitsFor: mine ? "you" : v.role === "visitor" ? v.appellant : "nobody",
+    kicker: mine ? "You may appeal" : `The ${v.appellant} may appeal`,
+    now: `The ${what} ${v.message} was judged ${v.verdict}; ${mine ? "you" : `the ${v.appellant}`} may appeal it until ${until}`,
+    time: `${span(left)} left of the ${APPEAL_WINDOW / 60} minutes after the verdict. After that the verdict is final.`,
+    need: mine
+      ? `Nothing, if the verdict is right. To appeal, write one short reason below${short ? ` and first deposit at least ${BOND} as credit` : ""}: the validators judge the same question once more, with your reason and the other side's last message added.`
+      : v.role === "visitor"
+        ? NOTHING_NEEDED
+        : `Nothing. The verdict went your way, so only the ${v.appellant} may appeal it; while it can, the side it favours waits to settle against it.`,
+    clock: `${runsAgainst(v.holder, v.role)} An appeal does not stop it; a changed verdict moves it back as of the verdict's own time.`,
+    leave: `${keep(v.commission, v.role)}; the window closes at ${until} whether or not this page is open.`,
+    canLeave: true,
+    money: `The ${gen(v.feeAtto)} fee stays held by the contract. An appeal puts up ${BOND} of the appellant's credit: kept if the verdict changes, moved to the other side's credit if not.`,
+    left,
+    leftLabel: "to appeal",
+  });
+}
+
 // ---- the demo maker at work -------------------------------------------------------------------------
 
 export type DemoInput = { state: "asking" | "failed"; what: string; commission: string; holder: Holder; feeAtto: string; reason?: string; mock?: boolean };
@@ -412,12 +547,67 @@ export type CommissionInput = {
   /** a commission of the demo studio, whose maker acts when its buttons are pressed */
   demo?: boolean;
   mock?: boolean;
+  /** the current stage of a commission paid in stages (n of 2 or more) */
+  stage?: StageInfo;
+  /** a delivery stands for the current stage */
+  stageDelivered?: boolean;
+  /** what the contract still holds of the fee */
+  heldAtto?: string;
+  /** the current stage's share of the fee */
+  shareAtto?: string;
+  /** a settlement by the side that could make it waits until this second for the other side's appeal window; 0 for none */
+  settleWaitsUntil?: number;
 };
 
 const used = (n: number, of: number) => `${span(n)} of ${span(of)}`;
 
-/** Every state of one commission, for its client, its maker or anyone else. */
+/**
+ * Every state of one commission, for its client, its maker or anyone else. On a commission paid in
+ * stages the headline names the stage, the review asks for that stage's acceptance, and the fee line
+ * says what is still held and what was paid for the stages before it.
+ */
 export function commissionGuide(g: CommissionInput): Guide {
+  const staged = g.status === "active" && !!g.stage && g.stage.n > 1;
+  // On stages a settlement acts on the current stage's share (all that is held, on the last stage), and
+  // "a delivery" means one that stands for the current stage.
+  const base = staged && g.stage!.k < g.stage!.n && g.shareAtto ? g.shareAtto : (g.heldAtto ?? g.feeAtto);
+  const out = staged ? baseGuide({ ...g, feeAtto: base, deliveries: g.stageDelivered ? 1 : 0 }) : baseGuide(g);
+  if (g.status !== "active") return out;
+  if (staged) {
+    const st = g.stage!;
+    const last = st.k >= st.n;
+    out.now = `Stage ${st.k} of ${st.n} (${st.name}): ${out.now.charAt(0).toLowerCase()}${out.now.slice(1)}`;
+    const held = gen(g.heldAtto ?? g.feeAtto);
+    const paid = BigInt(g.makerPaidAtto || "0") + BigInt(g.clientPaidAtto || "0") > 0n;
+    // The one-stage line says the whole fee is held; on stages only what is still held is, so that sentence goes.
+    const rest = out.money
+      .split(/(?<=\.)\s+/)
+      .filter((x) => !/held by the contract/.test(x))
+      .join(" ")
+      .replace(" of it would come back", last ? " of what is held would come back" : " of this stage's share would come back")
+      .trim();
+    out.money =
+      `Of the ${gen(g.feeAtto)} fee, ${held} is still held by the contract for the stages not yet paid` +
+      (paid ? `; ${gen(g.makerPaidAtto)} has gone to the maker and ${gen(g.clientPaidAtto)} back to the client for the stages accepted so far.` : ".") +
+      (rest ? " " + rest : "");
+    if (g.role === "client" && g.clock.holder === "client" && g.stageDelivered)
+      out.need = last
+        ? "Accept the last stage to settle the commission, or ask for specific changes: a concrete revision hands the move back. Praise or a promise keeps it with you."
+        : `Accept stage ${st.k} to pay its share now and start stage ${st.k + 1}, or ask for specific changes: a concrete revision hands the move back.`;
+  }
+  const waits = g.settleWaitsUntil ?? 0;
+  if (waits > g.now && (out.id === "client-move-silence-open" || out.id === "maker-move-cancel-open") && g.role !== "visitor") {
+    const settler = out.id === "client-move-silence-open" ? "maker" : "client";
+    if (g.role === settler) {
+      out.note = `The ${settler === "maker" ? "client" : "maker"} may still appeal the latest verdict on one of your messages until ${clockTime(waits, g.now)}; you can settle once that window closes, ${span(waits - g.now)} from now, or once it is appealed.`;
+      out.left = waits - g.now;
+      out.leftLabel = "until you may settle";
+    }
+  }
+  return out;
+}
+
+function baseGuide(g: CommissionInput): Guide {
   const fee = gen(g.feeAtto);
   const stays = keep(g.id, g.role);
   const c = g.clock;

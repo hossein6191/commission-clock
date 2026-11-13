@@ -1,8 +1,9 @@
 // The demo maker, server side only (imported by app/api/demo/*). It holds a throwaway Studio test key
 // from the DEMO_MAKER_KEY environment variable and signs exactly three kinds of call with it, on
-// commissions of the demo studio whose brief is one of the four demo jobs word for word: accept() on a
-// request, and say() or deliver() with one of that job's FIXED actions in lib/demo-studio.ts. The
-// brief only picks the script; nothing a visitor types is ever signed. The key is never
+// commissions of its two demo studios whose brief is a demo job's word for word (one of four on the
+// one-stage studio, the mug's on the three-stage one): accept() on a request, and say() or deliver()
+// with one of that job's FIXED actions in lib/demo-studio.ts. The studio and the brief only pick the
+// script; nothing a visitor types is ever signed. The key is never
 // logged, never returned and never written anywhere; an answer names the maker's public address at
 // most.
 
@@ -13,7 +14,7 @@ import { balanceOf, contractAddress, isMock, readCommission, readStudiosOf, stud
 import { REPO_URL, draftsCommit } from "./config";
 import { cleanKey, keyProblem } from "./demo-key";
 import { DEMO_LIMITS, createLimiter } from "./demo-limit";
-import { DEMO_STUDIO_NAME, demoActProblem, demoActionFor, draftOf, draftUrl, isActionKey, repoOf, type DemoAction } from "./demo-studio";
+import { DEMO_STUDIO_NAME, STAGED_STUDIO_NAME, actionOf, demoActProblem, demoJobOf, draftOf, draftUrl, isActionKey, repoOf, type DemoAction } from "./demo-studio";
 import { idNumber } from "./rules";
 import { FINAL_STATUSES, rpc, sleep, statusName, type RawTx } from "./rpc";
 import type { DemoStatus } from "./types";
@@ -33,7 +34,7 @@ function demoAccount(): Account | null {
 export const NO_CONTRACT_REASON = "the contract is not deployed yet";
 export const RPC_DOWN = "Studio's RPC did not answer; try again in a minute";
 export const NO_BALANCE = "the demo maker's account holds no GEN and Studio's faucet did not top it up";
-export const NOT_OPEN = "the demo studio is not open on this contract yet (tools/open-demo-studio.mjs opens it)";
+export const NOT_OPEN = "the demo studio is not open on this contract yet (tools/open-demo-v2.mjs opens it)";
 export const NO_COMMIT = "the demo drafts are not pinned to a commit yet (DRAFTS_COMMIT in lib/config.ts, or NEXT_PUBLIC_DRAFTS_COMMIT)";
 export const NO_REPO = "the site does not know its public repository (NEXT_PUBLIC_REPO_URL), so it cannot build the drafts' addresses";
 
@@ -44,18 +45,18 @@ export function draftsState(): { drafts: boolean; draftsReason: string } {
   return { drafts: true, draftsReason: "" };
 }
 
-// The demo studio's id is read once and kept for five minutes: it never changes for one contract.
-let found: { contract: string; maker: string; studio: string; at: number } | null = null;
+// The demo studios' ids are read once and kept for five minutes: they never change for one contract.
+let found: { contract: string; maker: string; studio: string; staged: string; at: number } | null = null;
 
-/** The newest studio this key opened under the demo name, or "" when it has none. */
-async function demoStudioId(maker: string): Promise<string> {
+/** The newest studios this key opened under the two demo names; "" for one it has not opened. */
+async function demoStudioIds(maker: string): Promise<{ studio: string; staged: string }> {
   const contract = contractAddress().toLowerCase();
-  if (found && found.contract === contract && found.maker === maker && Date.now() - found.at < 300_000) return found.studio;
+  if (found && found.contract === contract && found.maker === maker && Date.now() - found.at < 300_000) return found;
   const rows = (await readStudiosOf(maker, 0, 20, { fresh: true })).data.rows;
-  const mine = rows.filter((r) => r.name === DEMO_STUDIO_NAME).sort((a, b) => idNumber(b.id) - idNumber(a.id));
-  const id = mine[0]?.id ?? "";
-  if (id) found = { contract, maker, studio: id, at: Date.now() };
-  return id;
+  const newest = (name: string) => rows.filter((r) => r.name === name).sort((a, b) => idNumber(b.id) - idNumber(a.id))[0]?.id ?? "";
+  const ids = { studio: newest(DEMO_STUDIO_NAME), staged: newest(STAGED_STUDIO_NAME) };
+  if (ids.studio && ids.staged) found = { contract, maker, ...ids, at: Date.now() };
+  return ids;
 }
 
 /** The demo key signs from its own balance; Studio's faucet refills it when it holds less than a GEN. */
@@ -80,7 +81,7 @@ async function ensureBalance(maker: string): Promise<boolean> {
 
 /** Whether the demo maker can act now, and exactly why not. */
 export async function demoStatusNow(): Promise<DemoStatus> {
-  const drafts = draftsState();
+  const drafts = { staged: "", ...draftsState() };
   if (isMock) return { online: false, maker: "", studio: "", reason: "in the demo build the demo maker answers in the browser", ...drafts };
   const problem = keyProblem(process.env.DEMO_MAKER_KEY);
   if (problem) return { online: false, maker: "", studio: "", reason: problem, ...drafts };
@@ -93,14 +94,14 @@ export async function demoStatusNow(): Promise<DemoStatus> {
     return { online: false, maker, studio: "", reason: RPC_DOWN, ...drafts };
   }
   if (!funded) return { online: false, maker, studio: "", reason: NO_BALANCE, ...drafts };
-  let id = "";
+  let ids = { studio: "", staged: "" };
   try {
-    id = await demoStudioId(maker);
+    ids = await demoStudioIds(maker);
   } catch {
     return { online: false, maker, studio: "", reason: RPC_DOWN, ...drafts };
   }
-  if (!id) return { online: false, maker, studio: "", reason: NOT_OPEN, ...drafts };
-  return { online: true, maker, studio: id, reason: "", ...drafts };
+  if (!ids.studio && !ids.staged) return { online: false, maker, studio: "", reason: NOT_OPEN, ...drafts };
+  return { online: true, maker, reason: "", ...drafts, ...ids };
 }
 
 const limiter = createLimiter(DEMO_LIMITS);
@@ -155,10 +156,11 @@ export async function sendDemo(commission: string, what: "accept" | string): Pro
   } catch {
     return { status: 502, body: { ok: false, reason: "could not read the commission from Studio; try again in a minute" } };
   }
-  const problem = demoActProblem(row ? { id: row.id, studio: row.studio, status: row.status, brief: row.brief } : null, s.studio, what, s.drafts);
+  const studios = { studio: s.studio, staged: s.staged };
+  const problem = demoActProblem(row ? { id: row.id, studio: row.studio, status: row.status, brief: row.brief } : null, studios, what, s.drafts);
   if (problem) return { status: row ? 409 : 404, body: { ok: false, reason: problem } };
-  // The brief picks which job's fixed move this key names; the move's own words are what is signed.
-  const action: "accept" | DemoAction = what === "accept" ? "accept" : demoActionFor(row!.brief, what)!;
+  // The studio and the brief pick which job's fixed move this key names; the move's own words are what is signed.
+  const action: "accept" | DemoAction = what === "accept" ? "accept" : actionOf(what, demoJobOf(row!, studios)!.key)!;
   const a = demoAccount()!;
   const call =
     action === "accept"

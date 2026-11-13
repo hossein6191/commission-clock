@@ -19,10 +19,10 @@ import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { getAddress, type Address } from "viem";
 import { notify } from "./browser-store";
-import { contractAddress, demoStudioFallback } from "./config";
+import { contractAddress, demoStagedFallback, demoStudioFallback } from "./config";
 import { RATE_LIMITED, createReadCache, decodeTx, isMissingMethodError, noteFailure, rpc, sleep, waitForCooldown, withRetry, type RawTx } from "./rpc";
-import { MESSAGE_KINDS, MESSAGE_VERDICTS, PAGE, STATUSES, idNumber, sentence, type CommissionStatus, type Holder, type MessageKind, type MessageVerdict, type Side } from "./rules";
-import type { Arg, Call, Commission, DemoAnswer, DemoStatus, Message, Paged, ReadResult, Rules, Stats, Studio, StudioRecord, TxStatus, WriteFn } from "./types";
+import { APPEAL_WINDOW, APPEAL_WORDS, MESSAGE_KINDS, MESSAGE_VERDICTS, PAGE, STATUSES, idNumber, sentence, type AppealWord, type CommissionStatus, type Holder, type MessageKind, type MessageVerdict, type Side } from "./rules";
+import type { Arg, Call, Commission, Credit, DemoAnswer, DemoStatus, Message, Paged, ReadResult, Rules, StageView, Stats, Studio, StudioRecord, TxStatus, VerdictView, WriteFn } from "./types";
 import { chainName, getChainId, getSigner } from "./wallet";
 
 export { RATE_LIMITED, cooldownRemainingMs } from "./rpc";
@@ -144,6 +144,47 @@ const side = (v: unknown): Side => (str(v) === "client" ? "client" : "maker");
 const verdict = (v: unknown): MessageVerdict => (MESSAGE_VERDICTS.includes(str(v) as MessageVerdict) ? (str(v) as MessageVerdict) : "unclear");
 const kind = (v: unknown): MessageKind => (MESSAGE_KINDS.includes(str(v) as MessageKind) ? (str(v) as MessageKind) : "say");
 const fp = (v: unknown): string => (/^[0-9a-f]{16}$/.test(str(v)) ? str(v) : "");
+const appealWord = (v: unknown): AppealWord => (APPEAL_WORDS.includes(str(v) as AppealWord) ? (str(v) as AppealWord) : "");
+const sideOrNone = (v: unknown): Side | "" => (str(v) === "maker" ? "maker" : str(v) === "client" ? "client" : "");
+
+export function mapStage(r: Row): StageView {
+  return {
+    k: num(r.k),
+    name: str(r.name),
+    about: str(r.about),
+    shareBps: num(r.share_bps),
+    shareAtto: atto(r.share),
+    status: str(r.status, "pending"),
+    releasedAtto: atto(r.released),
+    cutAtto: atto(r.cut),
+    cutBps: num(r.cut_bps),
+    url: str(r.url),
+    fp: fp(r.fp),
+    deliveredBy: num(r.delivered_by),
+    closedAt: secs(r.closed_at),
+  };
+}
+
+/** A latest judged press or delivery from commission(id); null when there is none yet. */
+export function mapVerdict(v: unknown): VerdictView | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const r = v as Row;
+  const message = str(r.message);
+  const n = Number(/#(\d+)$/.exec(message)?.[1] ?? 0);
+  if (!n) return null;
+  return {
+    message,
+    n,
+    kind: kind(r.kind),
+    verdict: str(r.verdict),
+    was: str(r.was),
+    appellant: side(r.appellant),
+    deadline: secs(r.deadline),
+    appeal: appealWord(r.appeal),
+    appealRole: sideOrNone(r.appeal_role),
+    open: r.open === true,
+  };
+}
 
 export function mapRecord(r: Row): StudioRecord {
   return {
@@ -162,6 +203,9 @@ export function mapRecord(r: Row): StudioRecord {
     delivered: num(r.delivered),
     missing: num(r.missing),
     lateSeconds: num(r.late_seconds),
+    stagesReleased: num(r.stages_released),
+    appeals: num(r.appeals),
+    overturned: num(r.overturned),
   };
 }
 
@@ -181,6 +225,7 @@ export function mapStudio(r: Row, id = ""): Studio {
     accepting: r.accepting === true,
     openedAt: secs(r.opened_at),
     record: mapRecord(asRow(r.record)),
+    stages: rowsOf(r.stages).map(mapStage),
   };
 }
 
@@ -221,6 +266,14 @@ export function mapCommission(r: Row, id = ""): Commission {
     makerPaidAtto: atto(r.maker_paid),
     clientPaidAtto: atto(r.client_paid),
     heldAtto: atto(r.held),
+    stage: Math.max(1, num(r.stage, 1)),
+    nStages: Math.max(1, num(r.n_stages, 1)),
+    stages: rowsOf(r.stages).map(mapStage),
+    lastPress: mapVerdict(r.last_press),
+    lastDelivery: mapVerdict(r.last_delivery),
+    appeals: num(r.appeals),
+    appealWindow: num(r.appeal_window, APPEAL_WINDOW),
+    appealBondAtto: atto(r.appeal_bond),
     now: secs(r.now),
     readAt: 0,
     makerLive: num(r.maker_live, -1),
@@ -240,6 +293,13 @@ export function mapMessage(r: Row): Message {
     verdict: verdict(r.verdict),
     fp: fp(r.fp),
     at: secs(r.at),
+    stage: num(r.stage, 1),
+    before: holder(r.before),
+    was: str(r.was),
+    appeal: appealWord(r.appeal),
+    appealRole: sideOrNone(r.appeal_role),
+    appealReason: str(r.appeal_reason),
+    appealAt: secs(r.appeal_at),
   };
 }
 
@@ -271,6 +331,11 @@ export function mapStats(r: Row): Stats {
     toClientsAtto: atto(r.to_clients),
     refusedPayments: num(r.refused_payments),
     returnedAtto: atto(r.returned),
+    stagesReleased: num(r.stages_released),
+    appeals: num(r.appeals),
+    overturned: num(r.overturned),
+    upheld: num(r.upheld),
+    creditAtto: atto(r.credit),
   };
 }
 
@@ -360,6 +425,13 @@ export async function readStats(opts: Fresh = {}): Promise<ReadResult<Stats>> {
   return result(mapStats(asRow(await view("stats", [], opts))));
 }
 
+/** credit_of(address): the credit an address holds for appeal bonds. */
+export async function readCredit(address: string, opts: Fresh = {}): Promise<ReadResult<Credit>> {
+  const value = asRow(await view("credit_of", [address.toLowerCase()], opts));
+  if ("error" in value) throw new Error(NETWORK_ERROR);
+  return result({ address: addr(value.address), creditAtto: atto(value.credit), bondAtto: atto(value.appeal_bond) });
+}
+
 /** rules(): the contract's own words for its askings, its clock, who may do what and where the money goes. */
 export async function readRules(): Promise<ReadResult<Rules>> {
   return result(asRow(await view("rules", [])));
@@ -370,7 +442,7 @@ export async function readRules(): Promise<ReadResult<Rules>> {
 export { calls } from "./calls";
 
 /** True for the calls the validators judge with their models: the rail then shows their votes. */
-export const isJudged = (fn: WriteFn) => fn === "say" || fn === "deliver";
+export const isJudged = (fn: WriteFn) => fn === "say" || fn === "deliver" || fn === "appeal";
 
 const WRONG_CHAIN = (chainId: number | null) => `Your wallet is on ${chainName(chainId)}. Switch it to GenLayer Studio (chain 61999) before signing.`;
 
@@ -492,7 +564,7 @@ export type Settled = { status: CommissionStatus; toMakerAtto: string; toClientA
 
 /** A settlement's return (withdraw_request, decline, accept_work, claim_silence, cancel_late). */
 export function settledOutcome(s: TxStatus | null): Settled | null {
-  if (!ok(s) || !STATUSES.includes(str(s.result.status) as CommissionStatus) || s.result.to_maker === undefined) return null;
+  if (!ok(s) || !STATUSES.includes(str(s.result.status) as CommissionStatus) || s.result.to_maker === undefined || s.result.accepted_stage !== undefined) return null;
   const r = s.result;
   return {
     status: status(r.status),
@@ -505,13 +577,48 @@ export function settledOutcome(s: TxStatus | null): Settled | null {
   };
 }
 
+export type StagePaid = { stage: number; next: number; shareAtto: string; toMakerAtto: string; toClientAtto: string; cutBps: number; heldAtto: string };
+
+/** accept_stage()'s return on a stage before the last: what that stage paid; null otherwise (the last stage settles). */
+export function stageOutcome(s: TxStatus | null): StagePaid | null {
+  if (!ok(s) || s.result.accepted_stage === undefined) return null;
+  const r = s.result;
+  return { stage: num(r.accepted_stage), next: num(r.stage), shareAtto: atto(r.share), toMakerAtto: atto(r.to_maker), toClientAtto: atto(r.to_client), cutBps: num(r.cut_bps), heldAtto: atto(r.held) };
+}
+
+export type AppealResult = { message: string; kind: MessageKind; appellant: Side; first: string; appeal: AppealWord; verdict: string; overturned: boolean; bond: string; creditAtto: string; holder: Holder };
+
+/** appeal()'s return: the first verdict, what the appeal came to, the verdict as it stands and where the bond went. */
+export function appealOutcome(s: TxStatus | null): AppealResult | null {
+  if (!ok(s) || s.result.appeal === undefined || s.result.first === undefined) return null;
+  const r = s.result;
+  return {
+    message: str(r.message),
+    kind: kind(r.kind),
+    appellant: side(r.appellant),
+    first: str(r.first),
+    appeal: appealWord(r.appeal),
+    verdict: str(r.verdict),
+    overturned: r.overturned === true,
+    bond: str(r.bond),
+    creditAtto: atto(r.credit),
+    holder: holder(r.holder),
+  };
+}
+
+/** deposit()'s or withdraw()'s return: the credit now held; null when it did not go through. */
+export function creditOutcome(s: TxStatus | null): { creditAtto: string; movedAtto: string } | null {
+  if (!ok(s) || s.result.credit === undefined || (s.result.added === undefined && s.result.paid === undefined)) return null;
+  return { creditAtto: atto(s.result.credit), movedAtto: atto(s.result.added ?? s.result.paid) };
+}
+
 /** True when GEN moves to or from somebody because of this call, so balances are watched afterwards. */
 export function movesMoney(s: TxStatus): boolean {
   const r = s.result;
   if (!r) return false;
   if (r.ok === false) return atto(r.returned) !== "0";
   if (r.ok !== true) return false;
-  return atto(r.to_maker) !== "0" || atto(r.to_client) !== "0";
+  return atto(r.to_maker) !== "0" || atto(r.to_client) !== "0" || atto(r.added) !== "0" || atto(r.paid) !== "0";
 }
 
 // ---- the demo maker ------------------------------------------------------------------------------
@@ -526,10 +633,12 @@ export async function readDemoStatus(): Promise<DemoStatus> {
     const res = await fetch("/api/demo/status", { cache: "no-store" });
     const body = (await res.json()) as Partial<DemoStatus>;
     const s = /^S[1-9]\d{0,8}$/.test(str(body.studio)) ? str(body.studio) : "";
+    const staged = /^S[1-9]\d{0,8}$/.test(str(body.staged)) ? str(body.staged) : "";
     const value: DemoStatus = {
       online: body.online === true,
       maker: addr(body.maker),
       studio: s || demoStudioFallback(),
+      staged: staged || demoStagedFallback(),
       reason: str(body.reason),
       drafts: body.drafts === true,
       draftsReason: str(body.draftsReason),
@@ -537,7 +646,7 @@ export async function readDemoStatus(): Promise<DemoStatus> {
     demoCache = { at: Date.now(), value };
     return value;
   } catch {
-    return { online: false, maker: "", studio: demoStudioFallback(), reason: "the site's server did not answer", drafts: false, draftsReason: "" };
+    return { online: false, maker: "", studio: demoStudioFallback(), staged: demoStagedFallback(), reason: "the site's server did not answer", drafts: false, draftsReason: "" };
   }
 }
 

@@ -2,7 +2,8 @@
 
 // How it works, in the contract's own words: the four askings of a press and of a delivery word for
 // word, how the answers combine, why this needs validators that agree and a live web they read, the
-// money table on the demo studio's terms, the limits, and rules() read live from the contract.
+// money table on the demo studio's terms, stages and the bonded appeal (contract version 2), the
+// limits, and rules() read live from the contract.
 
 import * as React from "react";
 
@@ -12,11 +13,16 @@ import { Placeholder, ReadError } from "@/components/read-state";
 import { useRead } from "@/components/use-read";
 import { readRules } from "@/lib/chain";
 import { acceptSplit, cancelSplit, silenceSplit, type ClockState } from "@/lib/clock";
-import { DEMO_TERMS } from "@/lib/demo-studio";
+import { DEMO_STAGES, DEMO_TERMS, STAGED_TERMS } from "@/lib/demo-studio";
+import { stageShares } from "@/lib/stages";
 import { durationLabel, gen, pct } from "@/lib/format";
 import {
   ACCEPT_WINDOW,
+  APPEAL_BOND,
+  APPEAL_WINDOW,
   KILL_BPS,
+  MAX_REASON,
+  MAX_STAGES,
   MAX_BRIEF,
   MAX_PAGE_TEXT,
   MAX_RAW_PAGE,
@@ -31,7 +37,11 @@ import {
   THREAD_WINDOW,
   TURN_GRACE,
   TURN_NOTICE,
+  stagesOf,
 } from "@/lib/rules";
+
+const STAGED = stagesOf(DEMO_STAGES).stages;
+const STAGED_SHARES = stageShares(STAGED_TERMS.feeAtto, STAGED.map((x) => x.bps));
 
 function Asking({ n, blocks, q }: { n: number; blocks: string; q: string }) {
   return (
@@ -196,8 +206,36 @@ export default function HowPage() {
         </p>
       </section>
 
+      <section aria-labelledby="stages">
+        <Section n={5} id="stages" title="Stages and the bonded appeal" sub="Contract version 2: a fee paid out in parts, and one second look at any verdict." />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="sheet p-4">
+            <h3 className="text-[20px]">Paid in stages</h3>
+            <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[14.5px] text-ink-2">
+              <li>A maker may split the fee into 1 to {MAX_STAGES} named stages, each with a share; the shares add up to the whole fee. A studio that names none has one stage, the whole fee.</li>
+              <li>The maker delivers one page per stage. The validators judge it against the brief and the current stage only: an outline is the Outline stage&apos;s piece, and missing at the Final stage.</li>
+              <li>The client accepts a delivered stage and its share is paid at once: the maker gets it less the late cut reached by then, taken on that share alone. The next stage starts with the move on the maker.</li>
+              <li>Accepting the last stage settles the commission. Silence or a late cancel settles only what is still held; stages already paid stay paid.</li>
+            </ul>
+            <p className="mt-3 text-[13.5px] text-ink-3">
+              The staged demo studio: {gen(STAGED_TERMS.feeAtto)} as {STAGED.map((x, i) => `${x.name} ${pct(x.bps)} (${gen(STAGED_SHARES[i])})`).join(", ")}.
+            </p>
+          </div>
+          <div className="sheet p-4">
+            <h3 className="text-[20px]">One bonded appeal per verdict</h3>
+            <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[14.5px] text-ink-2">
+              <li>The side a judged verdict went against may appeal it once, within {APPEAL_WINDOW / 60} minutes. Only the latest judged message and the latest judged delivery can be appealed.</li>
+              <li>It writes one reason (up to {MAX_REASON} characters) and puts up {gen(APPEAL_BOND)} from its credit on the contract. Credit is deposited and withdrawn at any time, and belongs to no commission.</li>
+              <li>The validators ask the same four askings again, with the reason and the other side&apos;s last message added as fenced argument. They must agree exactly, as before.</li>
+              <li>A different verdict replaces the first (both stay on the record), the move follows it as of the first verdict&apos;s time, and the bond stays. The same verdict moves the bond to the other side. An appeal is final.</li>
+              <li>While a verdict can still be appealed, the side it favoured cannot settle against the other on it, and the maker cannot deliver over a page the client has not answered.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <section aria-labelledby="limits">
-        <Section n={5} id="limits" title="The limits, stated plainly" />
+        <Section n={6} id="limits" title="The limits, stated plainly" />
         <ul className="grid list-disc gap-1.5 pl-5 text-[14.5px] text-ink-2 md:grid-cols-2">
           <li>Text is read, images are not: a delivery must hold the finished piece as text.</li>
           <li>A page must read the same for every validator at the moment of the delivery; a page that changes per visitor stores nothing.</li>
@@ -211,7 +249,7 @@ export default function HowPage() {
       </section>
 
       <section aria-labelledby="rules">
-        <Section n={6} id="rules" title="rules(), read live" sub="The contract's own words for its askings, its clock, who may do what and where the money goes." />
+        <Section n={7} id="rules" title="rules(), read live" sub="The contract's own words for its askings, its clock, who may do what and where the money goes." />
         {rules.error ? (
           <ReadError detail={rules.error} onRetry={rules.retry} />
         ) : !rules.data ? (

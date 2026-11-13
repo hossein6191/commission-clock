@@ -19,17 +19,41 @@
 import type { Call, DemoAnswer, DemoStatus, TxStatus, WriteFn } from "./types.ts";
 import { notify } from "./browser-store.ts";
 import { REPO_URL } from "./config.ts";
+import { appellantOf, holderAfter } from "./appeal.ts";
 import { capAfter, charged, cutOf, grace, lateTerms, live, moveTo, opensIn, type ClockState } from "./clock.ts";
-import { DEMO_ABOUT, DEMO_BRIEF, DEMO_STUDIO_NAME, DEMO_TERMS, actionOf, demoActProblem, demoActionFor, draftOf, draftUrl, repoOf, scriptedDelivery, scriptedPress, type DraftKey, type JobKey } from "./demo-studio.ts";
+import { CONTRACT_RULES } from "./contract-rules.ts";
+import {
+  DEMO_ABOUT,
+  DEMO_BRIEF,
+  DEMO_STAGES,
+  DEMO_STUDIO_NAME,
+  DEMO_TERMS,
+  STAGED_ABOUT,
+  STAGED_STUDIO_NAME,
+  STAGED_TERMS,
+  actionOf,
+  demoActProblem,
+  demoJobOf,
+  draftOf,
+  draftUrl,
+  repoOf,
+  scriptedDelivery,
+  scriptedPress,
+  type DraftKey,
+  type JobKey,
+} from "./demo-studio.ts";
 import {
   ACCEPT_WINDOW,
   ADDRESS_CHARS,
+  APPEAL_BOND,
+  APPEAL_WINDOW,
   BPS,
   FP_CHARS,
   ID_CHARS,
   KILL_BPS,
   MAX_ABOUT,
   MAX_BRIEF,
+  MAX_REASON,
   MAX_CLIENT_SECONDS,
   MAX_CUT_BPS,
   MAX_MAKER_SECONDS,
@@ -50,6 +74,7 @@ import {
   MIN_MAKER_SECONDS,
   MIN_MAX_CUT_BPS,
   MIN_NAME,
+  MIN_REASON,
   MIN_STEP,
   MIN_TEXT,
   PAGE,
@@ -66,10 +91,12 @@ import {
   numberArg,
   other,
   pyStrip,
+  stagesOf,
   termsProblem,
   textProblem,
   urlProblem,
   type CommissionStatus,
+  type Holder,
   type MessageKind,
   type MessageVerdict,
   type Side,
@@ -115,7 +142,7 @@ export const PERSONAS: Persona[] = [
   { address: MY_MAKER, name: "You, a maker", note: "Larkspur Lettering runs S2; C4 waits, C5 can be claimed" },
   { address: EARLIER_CLIENT, name: "An earlier client", note: "five commissions, one settled each way" },
   { address: PASSER_BY, name: "A passer-by", note: "may read everything and sign nothing that counts" },
-  { address: DEMO_MAKER, name: "The demo maker", note: "runs Fernhill Pottery copy desk, S1" },
+  { address: DEMO_MAKER, name: "The demo maker", note: "runs Fernhill Pottery copy desk, S1, and the same desk in three stages, S3" },
 ];
 
 let persona = VISITOR;
@@ -175,6 +202,10 @@ type StudioRec = {
   n_delivered: number;
   n_missing: number;
   late_seconds: number;
+  n_stages: number;
+  n_released: number;
+  n_appeals: number;
+  n_overturned: number;
 };
 
 type CommissionRec = ClockState & {
@@ -197,13 +228,59 @@ type CommissionRec = ClockState & {
   maker_paid: bigint;
   client_paid: bigint;
   held: bigint;
+  n_stages: number;
+  stage: number;
+  events: number;
+  maker_said: number;
+  client_said: number;
+  press_n: number;
+  delivery_n: number;
+  n_appeals: number;
 };
 
-type MessageRec = { commission_id: string; n: number; role: Side; kind: MessageKind; text: string; url: string; verdict: MessageVerdict; fp: string; at: number };
+type MessageRec = {
+  commission_id: string;
+  n: number;
+  role: Side;
+  kind: MessageKind;
+  text: string;
+  url: string;
+  verdict: MessageVerdict;
+  fp: string;
+  at: number;
+  stage: number;
+  before: Holder;
+  pinned: number;
+  events: number;
+  was: string;
+  appeal: string;
+  appeal_role: string;
+  appeal_reason: string;
+  appeal_at: number;
+};
+
+type StageRec = {
+  owner: string;
+  k: number;
+  name: string;
+  about: string;
+  share_bps: number;
+  share: bigint;
+  status: string;
+  released: bigint;
+  cut_bps: number;
+  cut: bigint;
+  url: string;
+  fp: string;
+  delivered_by: number;
+  closed_at: number;
+};
 
 const studioRows = new Map<string, StudioRec>();
 const commissionRows = new Map<string, CommissionRec>();
 const messageRows = new Map<string, MessageRec>();
+const stageRows = new Map<string, StageRec>();
+const credits = new Map<string, bigint>();
 const lists = new Map<string, string[]>();
 const n = {
   studio_count: 0,
@@ -232,6 +309,11 @@ const n = {
   n_delivered: 0,
   n_missing: 0,
   n_delivery_unclear: 0,
+  n_released: 0,
+  n_appeals: 0,
+  n_overturned: 0,
+  n_upheld: 0,
+  credit_total: 0n,
 };
 
 /** A refusal that raises: nothing is stored, and the receipt carries the sentence. */
@@ -268,17 +350,31 @@ function idArg(raw: unknown): string {
 }
 
 const push = (key: string, id: string) => lists.set(key, [...(lists.get(key) ?? []), id]);
+const stageRow = (owner: string, k: number): StageRec => stageRows.get(owner + "/" + k)!;
+const creditOf = (who: string): bigint => credits.get(who) ?? 0n;
 
 function transfer(to: string, value: bigint): void {
   contractBalance -= value;
   credit(to, value);
 }
 
+/** The contract's _move_to, with its count of events: every move of the clock is one. */
+function move(c: CommissionRec, side: Holder, now: number, by: number, upto: number = now): void {
+  if (c.holder === side) return;
+  moveTo(c, side, now, by, upto);
+  c.events++;
+}
+
+function newStage(owner: string, k: number, name: string, about: string, bps: number, share: bigint, status: string): StageRec {
+  return { owner, k, name, about, share_bps: bps, share, status, released: 0n, cut_bps: 0, cut: 0n, url: "", fp: "", delivered_by: 0, closed_at: 0 };
+}
+
 // ---- the writes -----------------------------------------------------------------------------------
 
 function openStudio(c: Ctx, args: unknown[]): Row {
   const [rawName, rawAbout] = args;
-  if (!isStr(rawName) || !isStr(rawAbout)) fail("the name and the about line are strings");
+  const rawStages = args[8];
+  if (!isStr(rawName) || !isStr(rawAbout) || !isStr(rawStages)) fail("the name, the about line and the stages are strings");
   const name = pyStrip(rawName as string);
   const about = pyStrip(rawAbout as string);
   let problem = textProblem(name, MIN_NAME, MAX_NAME, "the name");
@@ -288,6 +384,9 @@ function openStudio(c: Ctx, args: unknown[]): Row {
   const [fee, maker, client, step, cut, cap] = [args[2], args[3], args[4], args[5], args[6], args[7]].map(numberArg);
   problem = termsProblem({ fee, maker, client, step, cut, cap });
   if (problem) fail(problem);
+  const parsed = stagesOf(pyStrip(rawStages as string));
+  if (parsed.problem) fail(parsed.problem);
+  const parts = parsed.stages;
   const now = clock(c);
   n.studio_count++;
   const id = "S" + n.studio_count;
@@ -295,11 +394,13 @@ function openStudio(c: Ctx, args: unknown[]): Row {
     maker: c.sender, name, about, fee, maker_seconds: Number(maker), client_seconds: Number(client), step_seconds: Number(step), cut_bps: Number(cut),
     max_cut_bps: Number(cap), accepting: true, opened_at: now, n_commissions: 0, n_on_time: 0, n_late: 0, n_cancelled: 0, n_lapsed: 0, n_declined: 0,
     n_withdrawn: 0, n_presses: 0, n_passed: 0, n_kept: 0, n_unclear: 0, n_deliveries: 0, n_delivered: 0, n_missing: 0, late_seconds: 0,
+    n_stages: parts.length, n_released: 0, n_appeals: 0, n_overturned: 0,
   });
+  parts.forEach((p, i) => stageRows.set(id + "/" + (i + 1), newStage(id, i + 1, p.name, p.about, p.bps, 0n, "pending")));
   push("maker:" + c.sender, id);
   return {
     ok: true, studio: id, maker: c.sender, name, fee: fee.toString(), maker_seconds: Number(maker), client_seconds: Number(client), step_seconds: Number(step),
-    cut_bps: Number(cut), max_cut_bps: Number(cap), opened_at: now,
+    cut_bps: Number(cut), max_cut_bps: Number(cap), opened_at: now, stages: parts.map((p) => ({ name: p.name, about: p.about, share_bps: p.bps })),
   };
 }
 
@@ -361,8 +462,15 @@ function requestCommission(c: Ctx, rawStudio: unknown, rawBrief: unknown): Row {
     studio_id: id, client: who, maker: s.maker, brief, fee: value, makerSeconds: s.maker_seconds, clientSeconds: s.client_seconds, stepSeconds: s.step_seconds,
     cutBps: s.cut_bps, maxCutBps: s.max_cut_bps, status: "requested", holder: "", since: 0, handedBy: 0, makerUsed: 0, clientUsed: 0, requested_at: now,
     accepted_at: 0, settled_at: 0, n_messages: 0, n_deliveries: 0, last_url: "", last_fp: "", last_delivered_at: 0, maker_late: 0, cut_bps_total: 0,
-    maker_paid: 0n, client_paid: 0n, held: value,
+    maker_paid: 0n, client_paid: 0n, held: value, n_stages: s.n_stages, stage: 1, events: 0, maker_said: 0, client_said: 0, press_n: 0, delivery_n: 0, n_appeals: 0,
   });
+  let given = 0n;
+  for (let k = 1; k <= s.n_stages; k++) {
+    const t = stageRow(id, k);
+    const share = k === s.n_stages ? value - given : (value * BigInt(t.share_bps)) / BigInt(BPS);
+    given += share;
+    stageRows.set(cid + "/" + k, newStage(cid, k, t.name, t.about, t.share_bps, share, k === 1 ? "current" : "pending"));
+  }
   s.n_commissions++;
   n.held_total += value;
   n.taken_total += value;
@@ -373,9 +481,27 @@ function requestCommission(c: Ctx, rawStudio: unknown, rawBrief: unknown): Row {
   return { ok: true, commission: cid, studio: id, client: who, maker: s.maker, fee: value.toString(), held: value.toString(), status: "requested", requested_at: now };
 }
 
-function settle(c: CommissionRec, status: CommissionStatus, toMakerRaw: bigint, now: number, late: number, total: number): void {
+function pay(c: CommissionRec, toMaker: bigint, toClient: bigint): void {
+  c.maker_paid += toMaker;
+  c.client_paid += toClient;
+  n.to_makers += toMaker;
+  n.to_clients += toClient;
+  if (toMaker > 0n) transfer(c.maker, toMaker);
+  if (toClient > 0n) transfer(c.client, toClient);
+}
+
+function closeStage(cid: string, k: number, status: string, toMaker: bigint, toClient: bigint, total: number, now: number): void {
+  const t = stageRow(cid, k);
+  t.status = status;
+  t.released = toMaker;
+  t.cut = toClient;
+  t.cut_bps = total;
+  t.closed_at = now;
+}
+
+function settle(cid: string, c: CommissionRec, status: CommissionStatus, toMakerRaw: bigint, now: number, late: number, total: number): void {
   const wasActive = c.status === "active";
-  moveTo(c, "", now, 0);
+  move(c, "", now, 0);
   const held = c.held;
   const toMaker = toMakerRaw < 0n ? 0n : toMakerRaw > held ? held : toMakerRaw;
   const toClient = held - toMaker;
@@ -384,8 +510,7 @@ function settle(c: CommissionRec, status: CommissionStatus, toMakerRaw: bigint, 
   c.settled_at = now;
   c.maker_late = late;
   c.cut_bps_total = total;
-  c.maker_paid = toMaker;
-  c.client_paid = toClient;
+  for (let k = c.stage; k <= c.n_stages; k++) closeStage(cid, k, k === c.stage ? status : "closed", k === c.stage ? toMaker : 0n, k === c.stage ? toClient : 0n, total, now);
   const s = studioRows.get(c.studio_id)!;
   if (wasActive) {
     n.n_active--;
@@ -410,15 +535,13 @@ function settle(c: CommissionRec, status: CommissionStatus, toMakerRaw: bigint, 
     n.n_withdrawn++;
   }
   n.held_total -= held;
-  n.to_makers += toMaker;
-  n.to_clients += toClient;
-  if (toMaker > 0n) transfer(c.maker, toMaker);
-  if (toClient > 0n) transfer(c.client, toClient);
+  pay(c, toMaker, toClient);
 }
 
 const settled = (cid: string, c: CommissionRec): Row => ({
   ok: true, commission: cid, status: c.status, maker_used: c.makerUsed, client_used: c.clientUsed, maker_late: c.maker_late, cut_bps: c.cut_bps_total,
-  to_maker: c.maker_paid.toString(), to_client: c.client_paid.toString(), settled_at: c.settled_at,
+  to_maker: stageRow(cid, c.stage).released.toString(), to_client: stageRow(cid, c.stage).cut.toString(), maker_paid: c.maker_paid.toString(),
+  client_paid: c.client_paid.toString(), stage: c.stage, settled_at: c.settled_at,
 });
 
 function withdrawRequest(c: Ctx, raw: unknown): Row {
@@ -427,7 +550,7 @@ function withdrawRequest(c: Ctx, raw: unknown): Row {
   if (c.sender !== co.client) fail("only the client of " + cid + " may withdraw its request");
   if (co.status !== "requested") fail(cid + " is " + co.status + "; a request can be withdrawn only before the maker accepts it");
   const now = clock(c);
-  settle(co, "withdrawn", 0n, now, 0, 0);
+  settle(cid, co, "withdrawn", 0n, now, 0, 0);
   return settled(cid, co);
 }
 
@@ -437,7 +560,7 @@ function decline(c: Ctx, raw: unknown): Row {
   if (c.sender !== co.maker) fail("only the maker of " + cid + " may decline it");
   if (co.status !== "requested") fail(cid + " is " + co.status + "; only a request not yet accepted can be declined");
   const now = clock(c);
-  settle(co, "declined", 0n, now, 0, 0);
+  settle(cid, co, "declined", 0n, now, 0, 0);
   return settled(cid, co);
 }
 
@@ -463,9 +586,47 @@ function accept(c: Ctx, raw: unknown): Row {
 
 function log(cid: string, c: CommissionRec, role: Side, kind: MessageKind, text: string, url: string, verdict: MessageVerdict, fp: string, now: number): number {
   const k = c.n_messages + 1;
-  messageRows.set(cid + "#" + k, { commission_id: cid, n: k, role, kind, text, url, verdict, fp, at: now });
+  messageRows.set(cid + "#" + k, {
+    commission_id: cid, n: k, role, kind, text, url, verdict, fp, at: now, stage: c.stage, before: c.holder, pinned: c.handedBy, events: c.events, was: "",
+    appeal: "", appeal_role: "", appeal_reason: "", appeal_at: 0,
+  });
   c.n_messages = k;
   return k;
+}
+
+/** The contract's _judged: a judged verdict or an accepted stage is an event, stamped on its message. */
+function judged(cid: string, c: CommissionRec, k: number): void {
+  c.events++;
+  messageRows.get(cid + "#" + k)!.events = c.events;
+}
+
+/** The contract's _open_appeal: the side that may still appeal message k now, or "". */
+function openAppeal(cid: string, k: number, now: number): Side | "" {
+  if (k < 1) return "";
+  const m = messageRows.get(cid + "#" + k)!;
+  if (m.appeal !== "" || now > m.at + APPEAL_WINDOW) return "";
+  return appellantOf(m.kind, m.verdict, m.role);
+}
+
+/** The contract's _wait_for_appeal. */
+function waitForAppeal(cid: string, c: CommissionRec, settler: Side, now: number): void {
+  for (const k of [c.press_n, c.delivery_n]) {
+    const who = openAppeal(cid, k, now);
+    if (who !== "" && who !== settler && messageRows.get(cid + "#" + k)!.role === settler)
+      fail(
+        "the " + who + " may appeal the verdict on " + cid + "#" + k + " until " + (messageRows.get(cid + "#" + k)!.at + APPEAL_WINDOW) + "; the " + settler +
+          " settles after that, or once it is appealed",
+      );
+  }
+}
+
+/** The contract's _no_redelivery. */
+function noRedelivery(cid: string, c: CommissionRec, now: number): void {
+  const k = c.delivery_n;
+  if (openAppeal(cid, k, now) === "client" && c.client_said < k && messageRows.get(cid + "#" + k)!.stage === c.stage)
+    fail(
+      "the client may appeal the delivery " + cid + "#" + k + " until " + (messageRows.get(cid + "#" + k)!.at + APPEAL_WINDOW) + "; the maker delivers again after that, or once it is appealed",
+    );
 }
 
 function say(c: Ctx, rawId: unknown, rawText: unknown): Row {
@@ -483,6 +644,8 @@ function say(c: Ctx, rawId: unknown, rawText: unknown): Row {
   const pressed = role === co.holder;
   const verdict: MessageVerdict = pressed ? scriptedPress(text, co.brief) : "noted";
   const k = log(cid, co, role, "say", text, "", verdict, "", now);
+  if (role === "maker") co.maker_said = k;
+  else co.client_said = k;
   const s = studioRows.get(co.studio_id)!;
   if (pressed) {
     s.n_presses++;
@@ -490,7 +653,7 @@ function say(c: Ctx, rawId: unknown, rawText: unknown): Row {
     if (verdict === "pass") {
       s.n_passed++;
       n.n_passed++;
-      moveTo(co, other(role), now, k);
+      move(co, other(role), now, k);
     } else if (verdict === "keep") {
       s.n_kept++;
       n.n_kept++;
@@ -498,10 +661,20 @@ function say(c: Ctx, rawId: unknown, rawText: unknown): Row {
       s.n_unclear++;
       n.n_unclear++;
     }
+    co.press_n = k;
+    judged(cid, co, k);
   } else n.n_noted++;
   return {
-    ok: true, commission: cid, message: cid + "#" + k, role, verdict, holder: co.holder, since: co.since, maker_used: co.makerUsed, client_used: co.clientUsed, at: now,
+    ok: true, commission: cid, message: cid + "#" + k, role, verdict, holder: co.holder, since: co.since, appeal_until: pressed ? now + APPEAL_WINDOW : 0,
+    maker_used: co.makerUsed, client_used: co.clientUsed, at: now,
   };
+}
+
+function stand(cid: string, k: number, m: number, url: string, fp: string): void {
+  const t = stageRow(cid, k);
+  t.url = url;
+  t.fp = fp;
+  t.delivered_by = m;
 }
 
 function deliver(c: Ctx, rawId: unknown, rawUrl: unknown, rawNote: unknown): Row {
@@ -517,7 +690,8 @@ function deliver(c: Ctx, rawId: unknown, rawUrl: unknown, rawNote: unknown): Row
   problem = textProblem(note, 0, MAX_NOTE, "the note");
   if (problem) fail(problem);
   const now = clock(c);
-  const reading = scriptedDelivery(url, co.brief);
+  noRedelivery(cid, co, now);
+  const reading = scriptedDelivery(url, co.brief, co.n_stages >= 2 ? co.stage : 0);
   if ("error" in reading) throw new NotSettled(reading.error);
   const { verdict, fp } = reading;
   const k = log(cid, co, "maker", "deliver", note, url, verdict, fp, now);
@@ -529,16 +703,19 @@ function deliver(c: Ctx, rawId: unknown, rawUrl: unknown, rawNote: unknown): Row
     co.last_url = url;
     co.last_fp = fp;
     co.last_delivered_at = now;
+    stand(cid, co.stage, k, url, fp);
     s.n_delivered++;
     n.n_delivered++;
-    if (co.holder === "maker") moveTo(co, "client", now, k);
+    if (co.holder === "maker") move(co, "client", now, k);
   } else if (verdict === "missing") {
     s.n_missing++;
     n.n_missing++;
   } else n.n_delivery_unclear++;
+  co.delivery_n = k;
+  judged(cid, co, k);
   return {
-    ok: true, commission: cid, message: cid + "#" + k, url, verdict, fp, deliveries: co.n_deliveries, holder: co.holder, since: co.since, maker_used: co.makerUsed,
-    client_used: co.clientUsed, at: now,
+    ok: true, commission: cid, message: cid + "#" + k, url, verdict, fp, deliveries: co.n_deliveries, stage: co.stage, appeal_until: now + APPEAL_WINDOW,
+    holder: co.holder, since: co.since, maker_used: co.makerUsed, client_used: co.clientUsed, at: now,
   };
 }
 
@@ -551,22 +728,60 @@ function takeMove(c: Ctx, raw: unknown): Row {
   const role: Side = who === co.maker ? "maker" : "client";
   if (co.holder === role) fail("the " + role + " already holds the move on " + cid);
   const now = clock(c);
-  moveTo(co, role, now, 0);
+  move(co, role, now, 0);
   const k = log(cid, co, role, "take", "", "", "taken", "", now);
   n.n_takes++;
   return { ok: true, commission: cid, message: cid + "#" + k, holder: role, since: co.since, maker_used: co.makerUsed, client_used: co.clientUsed };
+}
+
+/** The contract's _accept_current: accept_stage and accept_work, once the sender is known to be the client. */
+function acceptCurrent(c: Ctx, cid: string, co: CommissionRec): Row {
+  if (co.status !== "active") fail(cid + " is " + co.status + "; work is accepted while it is active");
+  const k = co.stage;
+  const stage = stageRow(cid, k);
+  if (stage.delivered_by < 1) {
+    const what = co.n_stages === 1 ? "" : " for stage " + k + " (" + stage.name + ")";
+    fail("nothing has been delivered on " + cid + what + " yet; the maker delivers with a page first");
+  }
+  const now = clock(c);
+  const { late, total } = lateTerms(co, now);
+  if (k >= co.n_stages) {
+    settle(cid, co, "accepted", co.held - cutOf(co.held, total), now, late, total);
+    return settled(cid, co);
+  }
+  const share = stage.share;
+  const cut = cutOf(share, total);
+  co.held -= share;
+  n.held_total -= share;
+  closeStage(cid, k, "accepted", share - cut, cut, total, now);
+  pay(co, share - cut, cut);
+  const s = studioRows.get(co.studio_id)!;
+  s.n_released++;
+  n.n_released++;
+  co.stage = k + 1;
+  stageRow(cid, k + 1).status = "current";
+  const m = log(cid, co, "client", "stage", k + " (" + stage.name + ")", "", "accepted", "", now);
+  move(co, "maker", now, m);
+  judged(cid, co, m);
+  return {
+    ok: true, commission: cid, status: "active", accepted_stage: k, stage: k + 1, stages: co.n_stages, maker_used: co.makerUsed, client_used: co.clientUsed,
+    maker_late: late, cut_bps: total, share: share.toString(), to_maker: (share - cut).toString(), to_client: cut.toString(), held: co.held.toString(),
+    holder: co.holder, since: co.since, at: now,
+  };
+}
+
+function acceptStage(c: Ctx, raw: unknown): Row {
+  const cid = idArg(raw);
+  const co = commissionOf(cid);
+  if (c.sender !== co.client) fail("only the client of " + cid + " may accept its stages");
+  return acceptCurrent(c, cid, co);
 }
 
 function acceptWork(c: Ctx, raw: unknown): Row {
   const cid = idArg(raw);
   const co = commissionOf(cid);
   if (c.sender !== co.client) fail("only the client of " + cid + " may accept its work");
-  if (co.status !== "active") fail(cid + " is " + co.status + "; work is accepted while it is active");
-  if (co.n_deliveries < 1) fail("nothing has been delivered on " + cid + " yet; the maker delivers with a page first");
-  const now = clock(c);
-  const { late, total } = lateTerms(co, now);
-  settle(co, "accepted", co.fee - cutOf(co.fee, total), now, late, total);
-  return settled(cid, co);
+  return acceptCurrent(c, cid, co);
 }
 
 function claimSilence(c: Ctx, raw: unknown): Row {
@@ -583,9 +798,15 @@ function claimSilence(c: Ctx, raw: unknown): Row {
       "the client has used " + used + " of its " + co.clientSeconds + " seconds on " + cid + "; silence can be claimed once it is past them and its current turn has been charged " +
         TURN_NOTICE + " seconds, in " + left + " seconds if it does not move",
     );
+  waitForAppeal(cid, co, "maker", now);
   const { late, total } = lateTerms(co, now);
-  if (co.n_deliveries > 0) settle(co, "accepted_by_silence", co.fee - cutOf(co.fee, total), now, late, total);
-  else settle(co, "lapsed", cutOf(co.fee, Math.min(KILL_BPS, BPS - total)), now, late, total);
+  const held = co.held;
+  const kill = Math.min(KILL_BPS, BPS - total);
+  const stage = stageRow(cid, co.stage);
+  if (stage.delivered_by > 0) {
+    const share = stage.share;
+    settle(cid, co, "accepted_by_silence", share - cutOf(share, total) + cutOf(held - share, kill), now, late, total);
+  } else settle(cid, co, "lapsed", cutOf(held, kill), now, late, total);
   return settled(cid, co);
 }
 
@@ -603,9 +824,154 @@ function cancelLate(c: Ctx, raw: unknown): Row {
       "the maker's cut on " + cid + " is " + total + " of its " + co.maxCutBps + " basis point cap; it can be cancelled once the cut is at the cap and the maker's current turn " +
         "has been charged " + TURN_NOTICE + " seconds, in " + left + " seconds if the maker does not move",
     );
-  const toMaker = co.n_deliveries > 0 ? co.fee - cutOf(co.fee, total) : 0n;
-  settle(co, "cancelled_late", toMaker, now, late, total);
+  waitForAppeal(cid, co, "client", now);
+  const stage = stageRow(cid, co.stage);
+  const toMaker = stage.delivered_by > 0 ? stage.share - cutOf(stage.share, total) : 0n;
+  settle(cid, co, "cancelled_late", toMaker, now, late, total);
   return settled(cid, co);
+}
+
+// ---- the appeal -----------------------------------------------------------------------------------
+
+/** The contract's _appealable: the message `role` may appeal now, the later of the two when both went against it. */
+function appealable(cid: string, co: CommissionRec, role: Side, now: number): number {
+  const p = openAppeal(cid, co.press_n, now) === role ? co.press_n : 0;
+  const d = openAppeal(cid, co.delivery_n, now) === role ? co.delivery_n : 0;
+  if (p || d) return Math.max(p, d);
+  for (const k of [co.delivery_n, co.press_n]) {
+    if (k > 0) {
+      const m = messageRows.get(cid + "#" + k)!;
+      if (m.appeal !== "" && m.appeal_role === role && now <= m.at + APPEAL_WINDOW)
+        fail("the verdict on " + cid + "#" + k + " was appealed once already; an appeal is final " + "and is never appealed again");
+    }
+  }
+  return fail(
+    "no verdict on " + cid + " that went against the " + role + " can be appealed now: a verdict is " + "appealed by the side it went against, once, within " + APPEAL_WINDOW +
+      " seconds, and only the " + "latest judged press and the latest judged delivery can be",
+  );
+}
+
+function recount(s: StudioRec, kind: MessageKind, verdict: string, step: number): void {
+  if (kind === "say") {
+    if (verdict === "pass") {
+      s.n_passed += step;
+      n.n_passed += step;
+    } else if (verdict === "keep") {
+      s.n_kept += step;
+      n.n_kept += step;
+    } else {
+      s.n_unclear += step;
+      n.n_unclear += step;
+    }
+  } else if (verdict === "delivered") {
+    s.n_delivered += step;
+    n.n_delivered += step;
+  } else if (verdict === "missing") {
+    s.n_missing += step;
+    n.n_missing += step;
+  } else n.n_delivery_unclear += step;
+}
+
+/** The contract's _overturn: the move when nothing moved since, the stage's standing delivery while its stage is current; never any money. */
+function overturn(cid: string, co: CommissionRec, m: MessageRec, k: number, old: string, next: string, now: number): void {
+  if (co.events === m.events) {
+    const side = holderAfter(m.kind, next, m.role, m.before);
+    if (side !== co.holder) move(co, side, now, k, m.at);
+  }
+  if (m.kind !== "deliver") return;
+  if (next === "delivered") {
+    co.n_deliveries++;
+    if (m.stage === co.stage) {
+      stand(cid, m.stage, k, m.url, m.fp);
+      co.last_url = m.url;
+      co.last_fp = m.fp;
+      co.last_delivered_at = m.at;
+    }
+  } else if (old === "delivered") {
+    co.n_deliveries--;
+    const t = stageRow(cid, m.stage);
+    if (m.stage === co.stage && t.delivered_by === k) {
+      t.url = "";
+      t.fp = "";
+      t.delivered_by = 0;
+      co.last_url = "";
+      co.last_fp = "";
+      co.last_delivered_at = 0;
+    }
+  }
+}
+
+/**
+ * appeal(): in this demo build the round is the same scripted reader, so an appeal comes to the verdict
+ * it appealed (upheld) unless `forced` names another; on chain every validator judges it again itself.
+ */
+function appeal(c: Ctx, rawId: unknown, rawReason: unknown, forced = ""): Row {
+  if (!isStr(rawId) || !isStr(rawReason)) fail("the commission id and the reason are strings");
+  const cid = pyStrip(rawId as string);
+  const reason = pyStrip(rawReason as string);
+  const co = commissionOf(cid);
+  const who = c.sender;
+  if (who !== co.maker && who !== co.client) fail("only the maker or the client of " + cid + " may appeal a verdict on it");
+  if (co.status !== "active") fail(cid + " is " + co.status + "; a verdict is appealed while it is active");
+  const problem = textProblem(reason, MIN_REASON, MAX_REASON, "an appeal's reason");
+  if (problem) fail(problem);
+  const now = clock(c);
+  const role: Side = who === co.maker ? "maker" : "client";
+  const k = appealable(cid, co, role, now);
+  if (creditOf(who) < APPEAL_BOND) fail("an appeal puts up " + APPEAL_BOND + " atto of credit; the " + role + " has " + creditOf(who) + "; deposit first");
+  const m = messageRows.get(cid + "#" + k)!;
+  const value = forced || m.verdict;
+  const old = m.verdict;
+  const next = value === "changed" ? (role === "client" ? "missing" : old) : value;
+  m.appeal = value;
+  m.appeal_role = role;
+  m.appeal_reason = reason;
+  m.appeal_at = now;
+  co.n_appeals++;
+  const s = studioRows.get(co.studio_id)!;
+  s.n_appeals++;
+  n.n_appeals++;
+  const otherSide = role === "maker" ? co.client : co.maker;
+  if (next !== old) {
+    m.was = old;
+    m.verdict = next as MessageVerdict;
+    s.n_overturned++;
+    n.n_overturned++;
+    recount(s, m.kind, old, -1);
+    recount(s, m.kind, next, 1);
+    overturn(cid, co, m, k, old, next, now);
+  } else {
+    n.n_upheld++;
+    credits.set(who, creditOf(who) - APPEAL_BOND);
+    credits.set(otherSide, creditOf(otherSide) + APPEAL_BOND);
+  }
+  return {
+    ok: true, commission: cid, message: cid + "#" + k, kind: m.kind, appellant: role, first: old, appeal: value, verdict: next, overturned: next !== old,
+    bond: next !== old ? "kept" : "to the " + other(role), credit: creditOf(who).toString(), holder: co.holder, since: co.since, maker_used: co.makerUsed,
+    client_used: co.clientUsed, stage: co.stage, at: now,
+  };
+}
+
+// ---- credit ---------------------------------------------------------------------------------------
+
+function deposit(c: Ctx): Row {
+  const value = c.value;
+  const who = c.sender;
+  if (value < 1n) return refuse(who, value, "send the amount to add to your credit", { credit: creditOf(who).toString() });
+  credits.set(who, creditOf(who) + value);
+  n.credit_total += value;
+  return { ok: true, address: who, added: value.toString(), credit: creditOf(who).toString() };
+}
+
+function withdraw(c: Ctx, raw: unknown): Row {
+  const value = numberArg(raw);
+  const who = c.sender;
+  const have = creditOf(who);
+  if (value < 1n || value > have) fail("a withdrawal is a whole number of atto from 1 to the credit held, " + have);
+  credits.set(who, have - value);
+  n.credit_total -= value;
+  transfer(who, value);
+  return { ok: true, address: who, paid: value.toString(), credit: (have - value).toString() };
 }
 
 function run(fn: WriteFn, args: unknown[], c: Ctx): Row {
@@ -630,16 +996,44 @@ function run(fn: WriteFn, args: unknown[], c: Ctx): Row {
       return deliver(c, args[0], args[1], args[2]);
     case "take_move":
       return takeMove(c, args[0]);
+    case "accept_stage":
+      return acceptStage(c, args[0]);
     case "accept_work":
       return acceptWork(c, args[0]);
     case "claim_silence":
       return claimSilence(c, args[0]);
     case "cancel_late":
       return cancelLate(c, args[0]);
+    case "appeal":
+      return appeal(c, args[0], args[1]);
+    case "deposit":
+      return deposit(c);
+    case "withdraw":
+      return withdraw(c, args[0]);
   }
 }
 
 // ---- the views ------------------------------------------------------------------------------------
+
+function stageView(owner: string, k: number): Row {
+  const t = stageRow(owner, k);
+  return {
+    k, name: t.name, about: t.about, share_bps: t.share_bps, share: t.share.toString(), status: t.status, released: t.released.toString(), cut: t.cut.toString(),
+    cut_bps: t.cut_bps, url: t.url, fp: t.fp, delivered_by: t.delivered_by, closed_at: t.closed_at,
+  };
+}
+
+const stagesView = (owner: string, count: number): Row[] => Array.from({ length: count }, (_, i) => stageView(owner, i + 1));
+
+function verdictView(cid: string, k: number, now: number): Row | null {
+  if (k < 1) return null;
+  const m = messageRows.get(cid + "#" + k)!;
+  const first = m.was ? m.was : m.verdict;
+  return {
+    message: cid + "#" + k, kind: m.kind, verdict: m.verdict, was: m.was, appellant: appellantOf(m.kind, first, m.role), deadline: m.at + APPEAL_WINDOW,
+    appeal: m.appeal, appeal_role: m.appeal_role, open: now >= 0 && commissionRows.get(cid)!.status === "active" && openAppeal(cid, k, now) !== "",
+  };
+}
 
 function studioRow(id: string): Row {
   const s = studioRows.get(id)!;
@@ -649,27 +1043,34 @@ function studioRow(id: string): Row {
     record: {
       commissions: s.n_commissions, on_time: s.n_on_time, late: s.n_late, cancelled_late: s.n_cancelled, lapsed: s.n_lapsed, declined: s.n_declined,
       withdrawn: s.n_withdrawn, presses: s.n_presses, passed: s.n_passed, kept: s.n_kept, unclear: s.n_unclear, deliveries: s.n_deliveries,
-      delivered: s.n_delivered, missing: s.n_missing, late_seconds: s.late_seconds,
+      delivered: s.n_delivered, missing: s.n_missing, late_seconds: s.late_seconds, stages_released: s.n_released, appeals: s.n_appeals, overturned: s.n_overturned,
     },
+    stages: stagesView(id, s.n_stages),
   };
 }
 
 function commissionRow(cid: string): Row {
   const c = commissionRows.get(cid)!;
   const s = studioRows.get(c.studio_id)!;
+  const now = mockNow();
   return {
     commission: cid, studio: c.studio_id, studio_name: s.name, maker: c.maker, client: c.client, brief: c.brief, fee: c.fee.toString(), status: c.status,
     holder: c.holder, since: c.since, handed_by: c.handedBy, grace: grace(c), maker_used: c.makerUsed, client_used: c.clientUsed, maker_seconds: c.makerSeconds,
     client_seconds: c.clientSeconds, step_seconds: c.stepSeconds, cut_bps: c.cutBps, max_cut_bps: c.maxCutBps, cap_after: capAfter(c), kill_bps: KILL_BPS,
     requested_at: c.requested_at, accepted_at: c.accepted_at, settled_at: c.settled_at, messages: c.n_messages, deliveries: c.n_deliveries,
     last_url: c.last_url, last_fp: c.last_fp, last_delivered_at: c.last_delivered_at, maker_late: c.maker_late, cut_bps_total: c.cut_bps_total,
-    maker_paid: c.maker_paid.toString(), client_paid: c.client_paid.toString(), held: c.held.toString(),
+    maker_paid: c.maker_paid.toString(), client_paid: c.client_paid.toString(), held: c.held.toString(), stage: c.stage, n_stages: c.n_stages,
+    stages: stagesView(cid, c.n_stages), last_press: verdictView(cid, c.press_n, now), last_delivery: verdictView(cid, c.delivery_n, now), appeals: c.n_appeals,
+    appeal_window: APPEAL_WINDOW, appeal_bond: APPEAL_BOND.toString(),
   };
 }
 
 function messageRow(key: string): Row {
   const m = messageRows.get(key)!;
-  return { message: key, n: m.n, role: m.role, kind: m.kind, text: m.text, url: m.url, verdict: m.verdict, fp: m.fp, at: m.at };
+  return {
+    message: key, n: m.n, role: m.role, kind: m.kind, text: m.text, url: m.url, verdict: m.verdict, fp: m.fp, at: m.at, stage: m.stage, before: m.before, was: m.was,
+    appeal: m.appeal, appeal_role: m.appeal_role, appeal_reason: m.appeal_reason, appeal_at: m.appeal_at,
+  };
 }
 
 function pageOf(key: string, offset: unknown, limit: unknown): { total: number; start: number; size: number; ids: string[] } {
@@ -690,112 +1091,6 @@ function counted(total: number, offset: unknown, limit: unknown): { start: numbe
   for (let k = start + 1; k <= Math.min(total, start + size); k++) numbers.push(k);
   return { start, size, numbers };
 }
-
-/** rules(), as the contract publishes it. */
-const RULES = {
-  press: {
-    value: '{"verdict": "pass" | "keep" | "unclear"}',
-    askings: [
-      "1, blocks BRIEF, THREAD, MESSAGE: " + QUESTION_HAND,
-      "2, blocks BRIEF, MESSAGE, THREAD: " + QUESTION_HAND,
-      "3, blocks BRIEF, THREAD, MESSAGE: " + QUESTION_CARRY,
-      "4, blocks BRIEF, MESSAGE, THREAD: " + QUESTION_CARRY,
-    ],
-    rules: PRESS_RULES,
-    sides: "{holder} is the side that holds the move and {other} the other side: the words maker and client, put in by the contract",
-    thread:
-      "the last " + THREAD_WINDOW + " earlier messages, oldest first, one line each, labelled MAKER or CLIENT; when the message that handed the holder the move is older, it " +
-      "comes first, followed by the line " + THREAD_GAP,
-    combine: { pass: "HAND yes in both orders and CARRY no in both orders", keep: "HAND no in both orders and CARRY yes in both orders", unclear: "anything else" },
-    outcome: {
-      pass: "the move goes to the other side",
-      keep: "the move stays",
-      unclear: "the move stays; the holder may rephrase",
-      noted: "a message from the side that does not hold the move: recorded, nobody asked",
-    },
-  },
-  delivery: {
-    value: '{"verdict": "delivered" | "missing" | "unclear", "fp": "<16 hex>"}',
-    askings: [
-      "1, blocks BRIEF then PAGE: " + QUESTION_THERE,
-      "2, blocks PAGE then BRIEF: " + QUESTION_THERE,
-      "3, blocks BRIEF then PAGE: " + QUESTION_MISSING,
-      "4, blocks PAGE then BRIEF: " + QUESTION_MISSING,
-    ],
-    reading: READING,
-    page:
-      "fetched by every validator itself, its status first: 400 or above is a failed read and stores nothing; then as text, the whitespace of the first " + MAX_RAW_PAGE +
-      " characters collapsed to single spaces, the first " + MAX_PAGE_TEXT + " characters of that judged; fp is the first " + FP_CHARS + " hex characters of their sha256",
-    combine: { delivered: "THERE yes in both orders and MISSING no in both orders", missing: "THERE no in both orders and MISSING yes in both orders", unclear: "anything else" },
-    outcome: {
-      delivered: "recorded as the latest delivery; the move goes to the client if the maker held it",
-      missing: "nothing changes but the thread and the record",
-      unclear: "nothing changes but the thread and the record",
-    },
-  },
-  compared: "the whole value, by exact equality; every validator does all the work itself inside one consensus block, and never agrees with a leader that raised",
-  clock:
-    "the move is the maker's from acceptance; a turn starts at the time of the transaction that began it; a turn handed over by a judged message or a delivery is not charged for its first " +
-    TURN_GRACE +
-    " seconds, while a turn a side takes itself, or the maker's first turn, is charged from its own transaction; handing the move over adds the running turn's charged seconds to the holder's used seconds; a side's live use is its used seconds plus max(0, now - since - grace) while it holds the move; since never moves back; time comes from the transaction's own datetime",
-  money: {
-    request_commission: "the client pays exactly the studio's fee; it is held here",
-    withdraw_request: "before acceptance, the client: the whole fee back",
-    decline: "before acceptance, the maker: the whole fee back to the client",
-    late_cut: "maker_late = max(0, maker live use - maker_seconds); cut_bps = min(max_cut_bps, ceil(maker_late / step_seconds) * cut_bps); cut = fee * cut_bps // " + BPS,
-    accept_work: "the maker gets fee - cut, the client gets cut",
-    claim_silence:
-      "with a delivery: as accept_work; without: the maker gets fee * min(" + KILL_BPS + ", " + BPS + " - cut_bps) // " + BPS + ", a kill fee of " + KILL_BPS +
-      " basis points that never comes to more than fee - cut, and the client the rest",
-    cancel_late: "without a delivery, the whole fee back to the client; with one, as accept_work at the cap: the maker gets fee - cut, the client gets cut",
-    refusal: "a refused payable call returns everything sent, in the same transaction",
-    balance: "the contract holds exactly the fees of the commissions requested or active",
-  },
-  who: {
-    open_studio: "anyone; the sender is the maker; the terms are fixed for good",
-    close_studio: "the maker; stops new commissions only",
-    reopen_studio: "the maker",
-    request_commission: "anyone but the maker, with exactly the fee, while the studio is open",
-    withdraw_request: "the client, before acceptance",
-    decline: "the maker, before acceptance",
-    accept: "the maker, within " + ACCEPT_WINDOW + " seconds of the request; the clock starts with the move on the maker",
-    say: "the maker or the client, while active; a press when the sender holds the move",
-    deliver: "the maker, while active",
-    take_move: "the maker or the client, while active, onto itself",
-    accept_work: "the client, once a delivery is recorded",
-    claim_silence:
-      "the maker, while the client holds the move, the client's live use is past its allowance, and the client's current turn has been charged " + TURN_NOTICE + " seconds",
-    cancel_late: "the client, while the maker holds the move, the maker's cut is at its cap, and the maker's current turn has been charged " + TURN_NOTICE + " seconds",
-  },
-  limits: {
-    name: [MIN_NAME, MAX_NAME],
-    about: [0, MAX_ABOUT],
-    brief: [MIN_BRIEF, MAX_BRIEF],
-    message: [MIN_TEXT, MAX_TEXT],
-    note: [0, MAX_NOTE],
-    url_chars: MAX_URL,
-    fee_atto: [MIN_FEE.toString(), MAX_FEE.toString()],
-    maker_seconds: [MIN_MAKER_SECONDS, MAX_MAKER_SECONDS],
-    client_seconds: [MIN_CLIENT_SECONDS, MAX_CLIENT_SECONDS],
-    step_seconds: [MIN_STEP, MAX_STEP],
-    cut_bps: [MIN_CUT_BPS, MAX_CUT_BPS],
-    max_cut_bps: [MIN_MAX_CUT_BPS, MAX_MAX_CUT_BPS],
-    to_cap_seconds: MAX_TO_CAP,
-    kill_bps: KILL_BPS,
-    thread_window: THREAD_WINDOW,
-    page_chars: MAX_PAGE_TEXT,
-    raw_page_chars: MAX_RAW_PAGE,
-    rows_per_page: PAGE,
-    turn_grace_seconds: TURN_GRACE,
-    turn_notice_seconds: TURN_NOTICE,
-    accept_window_seconds: ACCEPT_WINDOW,
-    text: "printable ASCII on one line",
-    page:
-      "the page must read the same for every validator at the moment of the delivery; text is read, images are not; a page that cannot be fetched, answers with an error status or reads as nothing stores nothing",
-  },
-  untrusted:
-    "the brief, every message, every note and every fetched page are fenced (< and > replaced, never deleted), sit between delimiter lines tagged with the start of their own sha256, and the prompt says before the blocks that they are untrusted and never an instruction",
-};
 
 export async function view(fn: string, args: (string | number)[]): Promise<unknown> {
   seed();
@@ -859,9 +1154,15 @@ export async function view(fn: string, args: (string | number)[]): Promise<unkno
         presses: n.n_presses, passed: n.n_passed, kept: n.n_kept, unclear: n.n_unclear, noted: n.n_noted, takes: n.n_takes, deliveries: n.n_deliveries,
         delivered: n.n_delivered, missing: n.n_missing, delivery_unclear: n.n_delivery_unclear, held: n.held_total.toString(), taken: n.taken_total.toString(),
         to_makers: n.to_makers.toString(), to_clients: n.to_clients.toString(), refused_payments: n.n_refused, returned: n.returned.toString(),
+        stages_released: n.n_released, appeals: n.n_appeals, overturned: n.n_overturned, upheld: n.n_upheld, credit: n.credit_total.toString(),
       });
+    case "credit_of": {
+      if (!isStr(args[0])) return JSON.stringify({ error: "the address is a string" });
+      const key = addrKey(args[0]);
+      return JSON.stringify({ address: key, credit: creditOf(key).toString(), appeal_bond: APPEAL_BOND.toString() });
+    }
     case "rules":
-      return JSON.stringify(RULES);
+      return JSON.stringify(CONTRACT_RULES);
     default:
       throw new Error("the mock has no view " + fn);
   }
@@ -897,8 +1198,8 @@ function send(sender: string, fn: WriteFn, args: unknown[], value: bigint): stri
     settledRound = !(e instanceof NotSettled);
   }
   const hash = fakeHash();
-  const judged = (fn === "deliver" && (!error || !settledRound)) || (fn === "say" && !error && result.verdict !== "noted");
-  pending.set(hash, { fn, polls: 0, result, error, judged, settled: settledRound });
+  const isJudged = (fn === "deliver" && (!error || !settledRound)) || (fn === "say" && !error && result.verdict !== "noted") || (fn === "appeal" && !error);
+  pending.set(hash, { fn, polls: 0, result, error, judged: isJudged, settled: settledRound });
   notify();
   return hash;
 }
@@ -968,11 +1269,13 @@ export async function faucet(address: string): Promise<bigint> {
 // ---- the demo maker --------------------------------------------------------------------------------
 
 export function demoStatus(): DemoStatus {
-  return { online: true, maker: DEMO_MAKER, studio: "S1", reason: "", drafts: true, draftsReason: "" };
+  return { online: true, maker: DEMO_MAKER, studio: "S1", staged: "S3", reason: "", drafts: true, draftsReason: "" };
 }
 
 /** The demo maker's last transaction per commission: it acts one move at a time. */
 const lastDemoTx = new Map<string, string>();
+
+const DEMO_STUDIOS = { studio: "S1", staged: "S3" };
 
 function demoCommission(raw: string): { id: string; studio: string; status: string; brief: string } | null {
   const id = pyStrip(String(raw ?? "")).slice(0, ID_CHARS);
@@ -985,7 +1288,7 @@ export async function demoAccept(raw: string): Promise<DemoAnswer> {
   seed();
   await delay(300);
   const c = demoCommission(raw);
-  const problem = demoActProblem(c, "S1", "accept", true);
+  const problem = demoActProblem(c, DEMO_STUDIOS, "accept", true);
   if (problem) return { ok: false, reason: problem };
   const last = lastDemoTx.get(c!.id);
   if (last && !isDone(last)) return { ok: false, reason: `the demo maker is still waiting for its last move on ${c!.id} to be final; try again once it is` };
@@ -999,11 +1302,11 @@ export async function demoAct(raw: string, actionKey: string): Promise<DemoAnswe
   seed();
   await delay(300);
   const c = demoCommission(raw);
-  const problem = demoActProblem(c, "S1", actionKey, true);
+  const problem = demoActProblem(c, DEMO_STUDIOS, actionKey, true);
   if (problem) return { ok: false, reason: problem };
   const last = lastDemoTx.get(c!.id);
   if (last && !isDone(last)) return { ok: false, reason: `the demo maker is still waiting for its last move on ${c!.id} to be final; try again once it is` };
-  const a = demoActionFor(c!.brief, actionKey)!;
+  const a = actionOf(actionKey, demoJobOf(c!, DEMO_STUDIOS)!.key)!;
   const hash = a.kind === "say" ? send(DEMO_MAKER, "say", [c!.id, a.text], 0n) : send(DEMO_MAKER, "deliver", [c!.id, mockDraft(a.draft!, a.job), a.text], 0n);
   lastDemoTx.set(c!.id, hash);
   return { ok: true, hash };
@@ -1035,9 +1338,12 @@ function seed(): void {
   const D = DEMO_MAKER;
   const E = EARLIER_CLIENT;
   // S1, Fernhill Pottery copy desk: the demo studio on its demo terms.
-  at(D, now - 6 * DAY, "open_studio", [DEMO_STUDIO_NAME, DEMO_ABOUT, T.feeAtto.toString(), T.makerSeconds, T.clientSeconds, T.stepSeconds, T.cutBps, T.maxCutBps]);
+  at(D, now - 6 * DAY, "open_studio", [DEMO_STUDIO_NAME, DEMO_ABOUT, T.feeAtto.toString(), T.makerSeconds, T.clientSeconds, T.stepSeconds, T.cutBps, T.maxCutBps, ""]);
   // S2, the "You, a maker" persona's own studio: a gentler clock in hours and days.
-  at(MY_MAKER, now - 7 * DAY, "open_studio", ["Larkspur Lettering", "Shop copy and wedding stationery wording, written to the word count.", GEN.toString(), 2 * DAY, DAY, HOUR, 500, 4000]);
+  at(MY_MAKER, now - 7 * DAY, "open_studio", ["Larkspur Lettering", "Shop copy and wedding stationery wording, written to the word count.", GEN.toString(), 2 * DAY, DAY, HOUR, 500, 4000, ""]);
+  // S3, the same desk in three stages: Outline 20%, First draft 30%, Final 50%.
+  const ST = STAGED_TERMS;
+  at(D, now - 5 * DAY, "open_studio", [STAGED_STUDIO_NAME, STAGED_ABOUT, ST.feeAtto.toString(), ST.makerSeconds, ST.clientSeconds, ST.stepSeconds, ST.cutBps, ST.maxCutBps, DEMO_STAGES]);
   const fee = T.feeAtto;
   // C1: a whole commission that went right. The question passed the move, the answer passed it back,
   // the finished page was read on the web, and the client accepted: the maker was on time.
@@ -1072,12 +1378,31 @@ function seed(): void {
   at(E, t, "request_commission", ["S2", DEMO_BRIEF], GEN);
   at(MY_MAKER, t + HOUR, "accept", ["C5"]);
   at(MY_MAKER, t + 30 * HOUR, "deliver", ["C5", mockDraft("final"), "Here it is, ready for your shop."]);
+  // C6: a three-stage commission of S3. The outline was delivered and the client appealed it as only
+  // bullet points: upheld, so the bond went to the maker. The client accepted stage 1 and its share was
+  // paid. At stage 2 the maker asked which glaze to name and the question passed; the client appealed that
+  // the outline already names sea-green, and the appeal overturned it to keep: the move went back to the
+  // maker, the seconds in between charged to nobody. The maker now owes the first draft.
+  t = now - 4 * HOUR;
+  at(E, t, "request_commission", ["S3", DEMO_BRIEF], ST.feeAtto);
+  at(D, t + MIN, "accept", ["C6"]);
+  at(E, t + 2 * MIN, "deposit", [], 2n * APPEAL_BOND);
+  at(D, t + 5 * MIN, "deliver", ["C6", mockDraft("outline", "staged"), "The outline."]);
+  at(E, t + 7 * MIN, "appeal", ["C6", "This is only bullet points; I asked for a description."]);
+  at(E, t + 20 * MIN, "accept_stage", ["C6"]);
+  at(D, t + 25 * MIN, "say", ["C6", sayOf("question")]);
+  appealAt(E, t + 28 * MIN, "C6", "The outline you delivered already names the sea-green glaze, so there is nothing for me to answer.", "keep");
 }
 
-/** Test hook: the contract's held total and its own balance, which must be equal. */
-export function mockHeld(): { held: bigint; balance: bigint } {
+/** An appeal in the seeded past whose round comes to `forced`: the demo build's one overturned verdict. */
+function appealAt(sender: string, now: number, cid: string, reason: string, forced: string): Row {
+  return appeal({ sender, value: 0n, now }, cid, reason, forced);
+}
+
+/** Test hook: what the contract holds (every unpaid fee and every credit) and its own balance, which must be equal. */
+export function mockHeld(): { held: bigint; balance: bigint; fees: bigint; credit: bigint } {
   seed();
-  return { held: n.held_total, balance: contractBalance };
+  return { held: n.held_total + n.credit_total, balance: contractBalance, fees: n.held_total, credit: n.credit_total };
 }
 
 /** Test hook: the clock state of a commission, as the contract keeps it. */

@@ -93,7 +93,8 @@ def _load():
 cc = _load()
 
 ALLOWED = {
-    "_text_problem", "_url_problem", "_number_arg", "_steps_to_cap", "_cut_bps_for", "_cut_of",
+    "_text_problem", "_url_problem", "_number_arg", "_steps_to_cap", "_cut_bps_for", "_cut_of", "_stages_of",
+    "_appellant", "_holder_after", "_stage_text",
 }
 
 CLOCK = {"_grace", "_charged", "_live", "_opens_in", "_late_terms", "_cap_after"}
@@ -108,12 +109,13 @@ def _commission(state):
         since=state["since"], handed_by=state["handedBy"], maker_used=state["makerUsed"], client_used=state["clientUsed"],
         requested_at=0, accepted_at=0, settled_at=0, n_messages=0, n_deliveries=0, last_url="", last_fp="",
         last_delivered_at=0, maker_late=0, cut_bps_total=0, maker_paid=0, client_paid=0, held=0,
+        n_stages=1, stage=1, events=0, maker_said=0, client_said=0, press_n=0, delivery_n=0, n_appeals=0,
     )
 
 
-def _move(state, side, now, by):
+def _move(state, side, now, by, upto=None):
     c = _commission(state)
-    cc._move_to(c, side, now, by)
+    cc._move_to(c, side, now, by, now if upto is None else upto)
     return {"holder": c.holder, "since": c.since, "handedBy": c.handed_by, "makerUsed": c.maker_used,
             "clientUsed": c.client_used}
 
@@ -127,7 +129,7 @@ def answer(call):
         value = getattr(cc, args[0])
         return str(value) if isinstance(value, int) and not isinstance(value, bool) and abs(value) > 2 ** 53 else value
     if fn == "_move_to":
-        return _move(args[0], args[1], args[2], args[3])
+        return _move(*args[:5])
     if fn in CLOCK:
         c = _commission(args[0])
         out = getattr(cc, fn)(c, *args[1:])
@@ -136,6 +138,9 @@ def answer(call):
         raise ValueError("not an allowed helper: " + fn)
     if fn == "_cut_of":
         return str(cc._cut_of(int(args[0]), args[1]))  # an integer of atto does not survive a JavaScript number
+    if fn == "_stages_of":
+        parts, problem = cc._stages_of(args[0])
+        return {"stages": [{"name": p[0], "about": p[1], "bps": p[2]} for p in parts], "problem": problem}
     out = getattr(cc, fn)(*args)
     return list(out) if isinstance(out, tuple) else out
 

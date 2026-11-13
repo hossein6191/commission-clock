@@ -11,7 +11,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:site": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/unit/*.test.mjs",
-    "open-demo-studio": "node tools/open-demo-studio.mjs"
+    "open-demo-studio": "node tools/open-demo-studio.mjs",
+    "open-demo-v2": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/open-demo-v2.mjs"
   },
   "dependencies": {
     "genlayer-js": "1.1.8",

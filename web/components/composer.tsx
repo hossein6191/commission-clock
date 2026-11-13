@@ -13,7 +13,7 @@ import { Field } from "@/components/bits";
 import { Brass, Plunger } from "@/components/button";
 import { Suggest } from "@/components/suggest";
 import { draftsCommit, REPO_URL } from "@/lib/config";
-import { DEMO_JOBS, draftUrl, jobOfBrief, repoOf } from "@/lib/demo-studio";
+import { DEMO_JOBS, STAGED_DRAFTS, draftUrl, jobOfBrief, repoOf } from "@/lib/demo-studio";
 import { MOCK_COMMIT, MOCK_REPO } from "@/lib/chain-mock";
 import { isMock } from "@/lib/chain";
 import { MAX_NOTE, MAX_TEXT, deliveryProblem, messageProblem, plain, type Holder, type Side } from "@/lib/rules";
@@ -33,8 +33,8 @@ function useOrigin(): string {
  * The pages a maker can deliver with one click: the brief's demo job's drafts (the mug's for any other
  * brief), pinned to a commit, or this site's own copies when it is served over https.
  */
-export function deliveryChips(origin: string, brief = ""): { label: string; value: string }[] {
-  const drafts = (jobOfBrief(brief) ?? DEMO_JOBS[0]).drafts;
+export function deliveryChips(origin: string, brief = "", staged = false): { label: string; value: string }[] {
+  const drafts = staged ? STAGED_DRAFTS : (jobOfBrief(brief) ?? DEMO_JOBS[0]).drafts;
   const repo = isMock ? MOCK_REPO : repoOf(REPO_URL);
   const commit = isMock ? MOCK_COMMIT : draftsCommit();
   if (repo && commit) return drafts.map((d) => ({ label: `${d.file} (pinned)`, value: draftUrl(repo, commit, d.file) }));
@@ -51,6 +51,9 @@ export function Composer({
   onSay,
   onDeliver,
   onTake,
+  stageLabel = "",
+  deliverWait = "",
+  staged = false,
 }: {
   role: Side;
   holder: Holder;
@@ -61,6 +64,12 @@ export function Composer({
   onSay: (text: string, press: boolean) => void;
   onDeliver: (url: string, note: string) => void;
   onTake: () => void;
+  /** on a commission paid in stages: "stage 2 of 3 (First draft)" */
+  stageLabel?: string;
+  /** why the maker may not deliver again yet, and until when; "" when it may */
+  deliverWait?: string;
+  /** offer the three-stage demo job's pages */
+  staged?: boolean;
 }) {
   const [text, setText] = React.useState("");
   const [url, setUrl] = React.useState("");
@@ -72,7 +81,7 @@ export function Composer({
   const chips = messageChipsFor(role, holder, deliveries, brief);
   const sent = plain(text);
   const problem = messageProblem(sent);
-  const pages = deliveryChips(origin, brief);
+  const pages = deliveryChips(origin, brief, staged);
   const deliverProblem = deliveryProblem(url.trim(), plain(note));
   const other = role === "maker" ? "client" : "maker";
 
@@ -131,15 +140,15 @@ export function Composer({
           onSubmit={(e) => {
             e.preventDefault();
             setTriedDelivery(true);
-            if (deliverProblem || busy) return;
+            if (deliverProblem || busy || deliverWait) return;
             onDeliver(url.trim(), plain(note));
             setTriedDelivery(false);
           }}
         >
-          <h3 className="text-[19px]">Deliver the work</h3>
+          <h3 className="text-[19px]">{stageLabel ? `Deliver ${stageLabel}` : "Deliver the work"}</h3>
           <p className="mt-1 max-w-[62ch] text-[14px] text-ink-2">
             Point at the finished piece on a public page. Every validator opens it on the live web and asks whether the finished piece is there; read as delivered, the move goes
-            to the client for review.
+            to the client for review.{stageLabel ? ` On a commission paid in stages the page is judged against the current stage only: the piece that stage holds, not the whole job.` : ""}
           </p>
           <div className="mt-3 grid gap-3">
             <Field id="page" label="Page address" error={triedDelivery && deliverProblem ? deliverProblem.charAt(0).toUpperCase() + deliverProblem.slice(1) + "." : ""}>
@@ -156,7 +165,8 @@ export function Composer({
             </Field>
           </div>
           <div className="mt-4">
-            <Plunger type="submit" disabled={busy} label="Press: deliver the page" glyph={<span className="mono text-[12px]">PAGE</span>} />
+            {deliverWait && <p className="mb-2 text-[13.5px] text-amber-ink">{deliverWait}</p>}
+            <Plunger type="submit" disabled={busy || !!deliverWait} label="Press: deliver the page" glyph={<span className="mono text-[12px]">PAGE</span>} />
           </div>
         </form>
       )}

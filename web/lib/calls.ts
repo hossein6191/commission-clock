@@ -7,10 +7,13 @@ import type { Call } from "./types.ts";
 const int = (n: number): number => Math.trunc(n);
 
 export const calls = {
-  /** open_studio(name, about, fee_atto, maker_seconds, client_seconds, step_seconds, cut_bps, max_cut_bps): anyone; the sender is the maker. The fee travels as digits. */
-  openStudio: (name: string, about: string, feeAtto: bigint, makerSeconds: number, clientSeconds: number, stepSeconds: number, cutBps: number, maxCutBps: number): Call => ({
+  /**
+   * open_studio(name, about, fee_atto, maker_seconds, client_seconds, step_seconds, cut_bps, max_cut_bps, stages): anyone; the
+   * sender is the maker. The fee travels as digits; `stages` is "" for one stage, else name=share[=what it holds] joined by |.
+   */
+  openStudio: (name: string, about: string, feeAtto: bigint, makerSeconds: number, clientSeconds: number, stepSeconds: number, cutBps: number, maxCutBps: number, stages = ""): Call => ({
     fn: "open_studio",
-    args: [name, about, feeAtto.toString(), int(makerSeconds), int(clientSeconds), int(stepSeconds), int(cutBps), int(maxCutBps)],
+    args: [name, about, feeAtto.toString(), int(makerSeconds), int(clientSeconds), int(stepSeconds), int(cutBps), int(maxCutBps), stages],
   }),
   /** close_studio(studio): the maker stops new commissions. */
   closeStudio: (studio: string): Call => ({ fn: "close_studio", args: [studio] }),
@@ -30,8 +33,16 @@ export const calls = {
   deliver: (commission: string, url: string, note: string): Call => ({ fn: "deliver", args: [commission, url, note] }),
   /** take_move(commission): a party takes the move onto itself. */
   takeMove: (commission: string): Call => ({ fn: "take_move", args: [commission] }),
-  /** accept_work(commission): the client, once a delivery is recorded. */
+  /** accept_stage(commission): the client, once a delivery stands for the current stage; that stage's share is paid at once. */
+  acceptStage: (commission: string): Call => ({ fn: "accept_stage", args: [commission] }),
+  /** accept_work(commission): the one-stage name for accept_stage, kept. */
   acceptWork: (commission: string): Call => ({ fn: "accept_work", args: [commission] }),
+  /** appeal(commission, reason): the side the latest verdict went against, within the window, once, with the bond in its credit. */
+  appeal: (commission: string, reason: string): Call => ({ fn: "appeal", args: [commission, reason] }),
+  /** deposit(), payable: adds what is sent to the sender's credit for appeal bonds. */
+  deposit: (amountAtto: bigint): Call => ({ fn: "deposit", args: [], value: amountAtto }),
+  /** withdraw(amount): pays part or all of the sender's own credit back to the sender. The amount travels as digits. */
+  withdraw: (amountAtto: bigint): Call => ({ fn: "withdraw", args: [amountAtto.toString()] }),
   /** claim_silence(commission): the maker, once the client is past its allowance and its turn has had its notice. */
   claimSilence: (commission: string): Call => ({ fn: "claim_silence", args: [commission] }),
   /** cancel_late(commission): the client, once the maker's cut is at the cap and its turn has had its notice. */

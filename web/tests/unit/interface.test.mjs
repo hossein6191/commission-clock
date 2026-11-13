@@ -57,7 +57,7 @@ const pyString = (name) => {
 test("every write builder names a write method of the contract, with its arguments and its value", () => {
   const all = methods();
   const built = [
-    calls.openStudio("Fernhill", "", 10n ** 18n, 1200, 600, 120, 1000, 5000),
+    calls.openStudio("Fernhill", "", 10n ** 18n, 1200, 600, 120, 1000, 5000, "Outline=2000|Final=8000"),
     calls.closeStudio("S1"),
     calls.reopenStudio("S1"),
     calls.requestCommission("S1", "x".repeat(40), 10n ** 18n),
@@ -67,12 +67,16 @@ test("every write builder names a write method of the contract, with its argumen
     calls.say("C1", "hello"),
     calls.deliver("C1", "https://a.example/x.html", ""),
     calls.takeMove("C1"),
+    calls.acceptStage("C1"),
     calls.acceptWork("C1"),
     calls.claimSilence("C1"),
     calls.cancelLate("C1"),
+    calls.appeal("C1", "The brief already answers that."),
+    calls.deposit(10n ** 17n),
+    calls.withdraw(10n ** 17n),
   ];
   const writes = Object.entries(all).filter(([, m]) => m.kind === "write").map(([n]) => n).sort();
-  assert.equal(writes.length, 13);
+  assert.equal(writes.length, 17);
   assert.deepEqual([...new Set(built.map((c) => c.fn))].sort(), writes, "the site can send every write and nothing else");
   for (const c of built) {
     const m = all[c.fn];
@@ -83,13 +87,16 @@ test("every write builder names a write method of the contract, with its argumen
   assert.equal(open.args[2], "1500000000000000000", "the fee travels as a string of digits");
   assert.equal(open.args[3], 1200, "the seconds travel as integers");
   assert.equal(calls.requestCommission("S1", "brief", 5n).value, 5n, "the fee is the value sent");
+  assert.equal(open.args[8], "", "no stages is one stage");
+  assert.equal(calls.deposit(7n).value, 7n, "a deposit is the value sent");
+  assert.deepEqual(calls.withdraw(12n * 10n ** 17n).args, ["1200000000000000000"], "a withdrawal travels as digits");
 });
 
 test("every view the site reads is a view of the contract, and the site reads every view", () => {
   const all = methods();
   const read = [...chainSource.matchAll(/view\("(\w+)"/g)].map((m) => m[1]);
   const views = Object.entries(all).filter(([, m]) => m.kind === "view").map(([n]) => n);
-  assert.equal(views.length, 9);
+  assert.equal(views.length, 10);
   for (const name of read) assert.equal(all[name]?.kind, "view", `${name} is a view`);
   for (const name of views) assert.ok(read.includes(name), `the site reads ${name}`);
   for (const name of views) assert.ok(mockSource.includes(`case "${name}":`), `the in-memory contract answers ${name}`);
@@ -102,6 +109,7 @@ test("the limits are the contract's own", () => {
     BPS: 10000, MIN_MAKER_SECONDS: 600, MIN_CLIENT_SECONDS: 300, MIN_STEP: 60, MIN_CUT_BPS: 1, MAX_CUT_BPS: 2500, MIN_MAX_CUT_BPS: 100, MAX_MAX_CUT_BPS: 9000,
     KILL_BPS: 2500, TURN_GRACE: 300, TURN_NOTICE: 300, MIN_NAME: 3, MAX_NAME: 60, MAX_ABOUT: 300, MIN_BRIEF: 40, MAX_BRIEF: 800, MIN_TEXT: 1, MAX_TEXT: 600,
     MAX_URL: 200, MAX_NOTE: 300, THREAD_WINDOW: 6, MAX_PAGE_TEXT: 8000, FP_CHARS: 16, PAGE: 20, ID_CHARS: 16, ADDRESS_CHARS: 42,
+    MAX_STAGES: 4, MIN_STAGE_BPS: 100, MAX_STAGE_NAME: 40, MAX_STAGE_ABOUT: 200, APPEAL_WINDOW: 600, MIN_REASON: 1, MAX_REASON: 300,
   };
   for (const [name, value] of Object.entries(nums)) {
     assert.equal(Number(constant(name)), value, `${name} in the contract`);
@@ -117,6 +125,11 @@ test("the limits are the contract's own", () => {
   assert.equal(constant("MAX_FEE"), "100 * ATTO");
   assert.equal(rules.MAX_FEE, 100n * 10n ** 18n);
   assert.equal(constant("THREAD_GAP"), JSON.stringify(rules.THREAD_GAP));
+  assert.equal(constant("APPEAL_BOND"), "ATTO // 10");
+  assert.equal(rules.APPEAL_BOND, 10n ** 17n);
+  assert.equal(constant("MAX_STAGES_ARG"), "MAX_STAGES * (MAX_STAGE_NAME + MAX_STAGE_ABOUT + 8)");
+  assert.equal(rules.MAX_STAGES_ARG, 992);
+  for (const [name, value] of [["STAGE_SEP", "|"], ["FIELD_SEP", "="], ["ONE_STAGE", "The work"]]) assert.equal(constant(name).replace(/\s+#.*$/, ""), JSON.stringify(value), name);
   assert.match(raw, /^URL_SIGNS = \("-", "\.", "_", "~", "\/", "\?", "&", "=", "%", "\+", ":", "@"\)$/m);
   assert.deepEqual(rules.URL_SIGNS, ["-", ".", "_", "~", "/", "?", "&", "=", "%", "+", ":", "@"]);
   assert.match(raw, /^HOST_SIGNS = \("-", "\."\)$/m);

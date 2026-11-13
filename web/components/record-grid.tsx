@@ -22,6 +22,9 @@ export function RecordGrid({ r, className }: { r: StudioRecord; className?: stri
     ["Pages read", String(r.deliveries)],
     ["Delivered", String(r.delivered), "text-felt-ink"],
     ["Missing", String(r.missing), "text-flag-ink"],
+    ["Stages paid early", String(r.stagesReleased ?? 0), "text-felt-ink"],
+    ["Appeals", String(r.appeals ?? 0)],
+    ["Overturned", String(r.overturned ?? 0), "text-amber-ink"],
   ];
   return (
     <dl className={cx("grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3", className)}>

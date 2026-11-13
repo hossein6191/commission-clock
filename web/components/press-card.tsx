@@ -4,12 +4,14 @@
 // they delivered), and the stamp the network's verdict earned. A demo draft links to the copy this
 // site serves, so a visitor can read what every validator read.
 
+import { AppealMark } from "@/components/appeal";
 import { Time } from "@/components/bits";
 import { IconExternal, IconPage } from "@/components/icons";
 import { draftOfUrl } from "@/lib/demo-studio";
 import { pageName } from "@/lib/format";
 import { stampOf, type StampTone } from "@/lib/receipt";
-import type { Side } from "@/lib/rules";
+import type { VerdictView } from "@/lib/appeal";
+import type { CommissionStatus, Side } from "@/lib/rules";
 import type { Message } from "@/lib/types";
 import { cx } from "@/lib/cx";
 
@@ -23,7 +25,25 @@ const TONE: Record<StampTone, string> = {
   taken: "text-walnut-light",
 };
 
-export function PressCard({ m, viewer, fresh }: { m: Message; viewer: Side | "visitor"; fresh?: boolean }) {
+export function PressCard({
+  m,
+  viewer,
+  fresh,
+  latest = null,
+  now = 0,
+  status = "active",
+  stageName,
+}: {
+  m: Message;
+  viewer: Side | "visitor";
+  fresh?: boolean;
+  /** the commission's latest judged press or delivery of this message's kind, whose appeal window may be open */
+  latest?: VerdictView | null;
+  now?: number;
+  status?: CommissionStatus;
+  /** on a commission paid in stages: the name of the stage that was current */
+  stageName?: string;
+}) {
   const stamp = stampOf(m, viewer);
   const mine = viewer === m.role;
   const draft = m.kind === "deliver" ? draftOfUrl(m.url) : null;
@@ -39,6 +59,8 @@ export function PressCard({ m, viewer, fresh }: { m: Message; viewer: Side | "vi
           <Time at={m.at} />
         </div>
         {m.kind === "say" && <p className="mt-1.5 text-[15px] break-words text-ink">{m.text}</p>}
+        {stageName && m.kind !== "stage" && <p className="mono mt-0.5 text-[11.5px] text-ink-3">during stage {m.stage}: {stageName}</p>}
+        {m.kind === "stage" && <p className="mt-1.5 text-[15px] text-ink">Accepted stage {m.text}</p>}
         {m.kind === "take" && <p className="mt-1.5 text-[15px] text-ink-2 italic">took the move onto itself</p>}
         {m.kind === "deliver" && (
           <div className="mt-1.5 text-[15px]">
@@ -61,6 +83,7 @@ export function PressCard({ m, viewer, fresh }: { m: Message; viewer: Side | "vi
           <span className={cx("stamp", TONE[stamp.tone], fresh && "stamp-new")}>{stamp.text}</span>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-snug text-ink-3">{stamp.meaning}</p>
+        <AppealMark m={m} latest={latest} now={now} status={status} />
       </div>
     </li>
   );

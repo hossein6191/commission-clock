@@ -132,7 +132,7 @@ function chips(key: JobKey, c: { answers: [string, string][]; revision: [string,
 }
 
 /** Every demo job's chips. */
-export const JOB_CHIPS: Record<JobKey, JobChips> = {
+export const JOB_CHIPS: Record<Exclude<JobKey, "staged">, JobChips> = {
   mug: chips("mug", {
     answers: [
       ["Sea-green", "Sea-green, please."],
@@ -167,7 +167,7 @@ export const JOB_CHIPS: Record<JobKey, JobChips> = {
 };
 
 /** The chips for a commission's brief: its demo job's, or the mug's for any other brief. */
-export const chipsFor = (brief: string): JobChips => JOB_CHIPS[(jobOfBrief(brief) ?? DEMO_JOBS[0]).key];
+export const chipsFor = (brief: string): JobChips => JOB_CHIPS[(jobOfBrief(brief) ?? DEMO_JOBS[0]).key as Exclude<JobKey, "staged">];
 
 /** What a maker writes while the client holds the move: noted. */
 export const MAKER_NOTE_CHIP: MessageChip = { label: "Check in", text: "Any thoughts on the draft?", expect: "noted", note: "noted: the client holds the move" };

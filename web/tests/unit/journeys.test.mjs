@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 
 import * as mock from "../../lib/chain-mock.ts";
 import { calls } from "../../lib/calls.ts";
-import { ACTION_KEYS, DEMO_BRIEF, DEMO_JOBS } from "../../lib/demo-studio.ts";
+import { ALL_ACTION_KEYS, DEMO_BRIEF, DEMO_JOBS } from "../../lib/demo-studio.ts";
 import { BRIEF_CHIPS } from "../../lib/suggestions.ts";
 
 /** A brief that is no demo job's: the demo maker refuses every move on it. */
@@ -50,7 +50,8 @@ async function check(total, step) {
     const c = await view("commission", ["C" + k]);
     const live = c.status === "requested" || c.status === "active";
     if (live) {
-      assert.equal(c.held, c.fee, `${step}: open C${k} holds its whole fee`);
+      assert.equal(BigInt(c.held) + BigInt(c.maker_paid) + BigInt(c.client_paid), BigInt(c.fee), `${step}: open C${k} holds what its accepted stages did not pay out`);
+      assert.equal(BigInt(c.held), c.stages.filter((t) => t.status === "current" || t.status === "pending").reduce((a, t) => a + BigInt(t.share), 0n), `${step}: open C${k} holds exactly its unpaid stages`);
       open += BigInt(c.held);
     } else {
       assert.equal(c.held, "0", `${step}: settled C${k} holds nothing`);
@@ -72,6 +73,10 @@ async function check(total, step) {
   assert.equal(st.waiting + st.active + st.accepted + st.accepted_by_silence + st.lapsed + st.cancelled_late + st.withdrawn + st.declined, st.commissions, `${step}: every commission is counted once`);
   assert.equal(st.presses, st.passed + st.kept + st.unclear, `${step}: every press has one verdict`);
   assert.equal(st.deliveries, st.delivered + st.missing + st.delivery_unclear, `${step}: every page read has one verdict`);
+  let credit = 0n;
+  for (const a of mock.ACCOUNTS) credit += BigInt((await view("credit_of", [a])).credit);
+  assert.equal(BigInt(st.credit), credit, `${step}: stats().credit is every account's credit`);
+  assert.equal(st.appeals, st.overturned + st.upheld, `${step}: every appeal was overturned or upheld`);
 }
 
 test("300 seeded random steps by anyone, in any order: the money and the clock stay whole", async () => {
@@ -85,7 +90,7 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
   })();
   await check(total, "seeded");
   const texts = [...DEMO_JOBS.flatMap((j) => j.lines.map((l) => l.text)), "Should the description be written in English?", "Working on it, nearly there.", "ok", "two\nlines"];
-  const pages = [mock.mockDraft("final"), mock.mockDraft("placeholder"), mock.mockDraft("revised"), mock.mockDraft("final", "cafe"), "https://nowhere.example/x.html", "http://bad.example/x"];
+  const pages = [mock.mockDraft("final"), mock.mockDraft("placeholder"), mock.mockDraft("revised"), mock.mockDraft("final", "cafe"), mock.mockDraft("outline", "staged"), mock.mockDraft("first_draft", "staged"), "https://nowhere.example/x.html", "http://bad.example/x"];
   for (let step = 0; step < 300; step++) {
     const st = await view("stats", []);
     const open = [...seen.values()].filter((c) => c.status === "requested" || c.status === "active").map((c) => c.commission);
@@ -97,13 +102,13 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
       mock.advanceClock(pick([30, 120, 301, 700, 1800, 4000]));
       label = "clock";
     } else if (roll < 0.3) {
-      const studio = pick(["S1", "S1", "S2", "S9"]);
-      const fee = studio === "S1" ? pick([10n ** 18n / 2n, 10n ** 18n / 2n, 1n]) : pick([10n ** 18n, 10n ** 18n, 1n]);
+      const studio = pick(["S1", "S1", "S2", "S3", "S3", "S9"]);
+      const fee = studio === "S1" || studio === "S3" ? pick([10n ** 18n / 2n, 10n ** 18n / 2n, 1n]) : pick([10n ** 18n, 10n ** 18n, 1n]);
       mock.setMockPersona(who);
       await finalOf(await mock.write(calls.requestCommission(studio, pick([DEMO_BRIEF, DEMO_BRIEF, BRIEF_CHIPS[1].value, BRIEF_CHIPS[2].value, BRIEF_CHIPS[3].value, OFF_SCRIPT, "short"]), fee)));
       label = `request ${studio}`;
     } else if (roll < 0.45) {
-      const a = r() < 0.3 ? await mock.demoAccept(cid) : await mock.demoAct(cid, pick(ACTION_KEYS));
+      const a = r() < 0.3 ? await mock.demoAccept(cid) : await mock.demoAct(cid, pick(ALL_ACTION_KEYS));
       if (a.ok) await finalOf(a.hash);
       label = `demo on ${cid}`;
     } else {
@@ -113,9 +118,17 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
         () => calls.accept(cid),
         () => calls.say(cid, pick(texts)),
         () => calls.say(cid, pick(texts)),
+        () => calls.say(cid, pick(texts)),
+        () => calls.say(cid, pick(texts)),
         () => calls.deliver(cid, pick(pages), "note"),
         () => calls.takeMove(cid),
         () => calls.acceptWork(cid),
+        () => calls.acceptStage(cid),
+        () => calls.acceptStage(cid),
+        () => calls.appeal(cid, pick(["The brief already answers that.", "This page holds the whole piece.", ""])),
+        () => calls.appeal(cid, "That verdict is wrong."),
+        () => calls.deposit(pick([10n ** 17n, 2n * 10n ** 17n, 0n])),
+        () => calls.withdraw(pick([10n ** 17n, 1n, 10n ** 20n])),
         () => calls.claimSilence(cid),
         () => calls.cancelLate(cid),
         () => calls.closeStudio("S2"),
@@ -135,4 +148,6 @@ test("300 seeded random steps by anyone, in any order: the money and the clock s
   assert.ok(st.presses > 10 && st.deliveries > 10, `and pressed (${st.presses}) and delivered (${st.deliveries})`);
   const ended = ["accepted", "accepted_by_silence", "lapsed", "cancelled_late", "withdrawn", "declined"].filter((k) => st[k] > 0);
   assert.ok(ended.length >= 5, `and settled in many ways: ${ended.join(", ")}`);
+  assert.ok(st.stages_released > 0, `and paid stages before the last (${st.stages_released})`);
+  assert.ok(st.appeals > 0, `and appealed (${st.appeals})`);
 });

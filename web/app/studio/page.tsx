@@ -8,16 +8,55 @@
 import * as React from "react";
 
 import { DemoNote, Section, TermsList } from "@/components/bits";
+import { BrassLink } from "@/components/button";
+import { StageTrack } from "@/components/stages";
 import { ChessClock } from "@/components/chess-clock";
 import { CommissionForm } from "@/components/commission-form";
 import { Placeholder, ReadError } from "@/components/read-state";
 import { RecordGrid } from "@/components/record-grid";
 import { useDemoStatus } from "@/components/use-demo";
 import { useAfterTx, useRead } from "@/components/use-read";
-import { readStudio } from "@/lib/chain";
-import { DEMO_JOBS, DEMO_STUDIO_NAME, DEMO_TERMS } from "@/lib/demo-studio";
+import { readStudio, studioPath } from "@/lib/chain";
+import { DEMO_JOBS, DEMO_STAGES, DEMO_STUDIO_NAME, DEMO_TERMS, STAGED_ABOUT, STAGED_STUDIO_NAME, STAGED_TERMS } from "@/lib/demo-studio";
+import { stageShares } from "@/lib/stages";
+import { stagesOf } from "@/lib/rules";
 import { durationLabel, gen, pct } from "@/lib/format";
-import { TURN_GRACE, TURN_NOTICE } from "@/lib/rules";
+import { APPEAL_WINDOW, TURN_GRACE, TURN_NOTICE } from "@/lib/rules";
+
+/** The three-stage demo studio's stages, as the contract reads its ninth argument. */
+const STAGED = stagesOf(DEMO_STAGES).stages;
+const STAGED_SHARES = stageShares(STAGED_TERMS.feeAtto, STAGED.map((x) => x.bps));
+
+/** The second demo studio: the mug job paid in three stages, so a visitor can walk every stage. */
+function StagedDemo({ id }: { id: string }) {
+  return (
+    <section aria-labelledby="staged-demo" className="sheet p-4 sm:p-6">
+      <p className="kicker text-ink-3">The second demo studio{id ? ` · ${id}` : ""}</p>
+      <h2 id="staged-demo" className="mt-0.5 text-[28px]">
+        {STAGED_STUDIO_NAME}
+      </h2>
+      <p className="mt-1 max-w-[66ch] text-[15px] text-ink-2">
+        {STAGED_ABOUT} Commission it with the mug brief and walk all three: the demo maker delivers the outline, you accept stage 1 and {gen(STAGED_SHARES[0])} is paid at once;
+        then the first draft, then the finished description. Each page is judged against the stage that is current, so the outline delivered at stage 2 reads as missing. A
+        verdict that went against you can be appealed once within {APPEAL_WINDOW / 60} minutes, with a 0.1 GEN bond from your credit.
+      </p>
+      <StageTrack
+        className="mt-3"
+        title={`${gen(STAGED_TERMS.feeAtto)}, paid in three stages`}
+        terms
+        current={0}
+        stages={STAGED.map((x, i) => ({ k: i + 1, name: x.name, about: x.about, shareBps: x.bps, shareAtto: STAGED_SHARES[i].toString(), status: "pending", releasedAtto: "0", cutAtto: "0", cutBps: 0, url: "", fp: "", deliveredBy: 0, closedAt: 0 }))}
+      />
+      {id ? (
+        <BrassLink href={studioPath(id)} className="mt-4">
+          Commission the staged studio
+        </BrassLink>
+      ) : (
+        <p className="mt-3 text-[14px] text-ink-3">The staged demo studio is not open on this contract yet; the one-stage studio above works meanwhile.</p>
+      )}
+    </section>
+  );
+}
 
 export default function DemoStudioPage() {
   const demo = useDemoStatus();
@@ -107,6 +146,8 @@ export default function DemoStudioPage() {
           </div>
         </div>
       )}
+
+      {demo && <StagedDemo id={demo.staged} />}
     </div>
   );
 }

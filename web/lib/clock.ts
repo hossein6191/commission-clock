@@ -66,10 +66,13 @@ export const silenceOpensIn = (c: ClockState, now: number): number => opensIn(c,
 /** cancel_late's wait: once the maker's cut is at the cap and its turn has been charged TURN_NOTICE. Only while the maker holds the move. */
 export const cancelOpensIn = (c: ClockState, now: number): number => opensIn(c, now, Math.max(TURN_NOTICE, capAfter(c) + 1 - c.makerUsed));
 
-/** The contract's _move_to: the holder's running turn is added to its used seconds; since never moves back. */
-export function moveTo(c: ClockState, side: Holder, now: number, by: number): void {
+/**
+ * The contract's _move_to: the holder's running turn, charged up to `upto` (now, except an appeal that
+ * changes a verdict, which passes the verdict's own time), is added to its used seconds; since never moves back.
+ */
+export function moveTo(c: ClockState, side: Holder, now: number, by: number, upto: number = now): void {
   if (c.holder === side) return;
-  const elapsed = charged(c, now);
+  const elapsed = charged(c, Math.min(upto, now));
   if (c.holder === "maker") c.makerUsed += elapsed;
   else if (c.holder === "client") c.clientUsed += elapsed;
   c.holder = side;

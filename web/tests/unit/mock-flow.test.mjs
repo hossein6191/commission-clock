@@ -42,8 +42,8 @@ async function conserved(total, step) {
   for (let k = 1; k <= stats.commissions; k++) {
     const c = await view("commission", ["C" + k]);
     const live = c.status === "requested" || c.status === "active";
-    assert.equal(BigInt(c.held), live ? BigInt(c.fee) : 0n, `${step}: C${k} holds its fee only while it is open`);
-    if (!live) assert.equal(BigInt(c.maker_paid) + BigInt(c.client_paid), BigInt(c.fee), `${step}: C${k} paid out its whole fee`);
+    assert.equal(BigInt(c.held) + BigInt(c.maker_paid) + BigInt(c.client_paid), BigInt(c.fee), `${step}: C${k} holds what it has not paid out`);
+    if (!live) assert.equal(BigInt(c.held), 0n, `${step}: C${k} holds nothing once settled`);
     open += BigInt(c.held);
   }
   assert.equal(BigInt(stats.held), open, `${step}: stats().held is every open fee`);

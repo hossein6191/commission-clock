@@ -297,8 +297,16 @@
     letter-spacing: 0.01em;
     text-decoration: none;
     white-space: nowrap;
+    max-width: 100%;
     cursor: pointer;
     transition: transform 100ms ease, box-shadow 100ms ease;
+  }
+  /* a long label wraps on a phone rather than pushing the page sideways */
+  @media (max-width: 639px) {
+    .brass {
+      white-space: normal;
+      text-align: center;
+    }
   }
   .brass:hover {
     filter: brightness(1.04);

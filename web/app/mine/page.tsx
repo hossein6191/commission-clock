@@ -3,6 +3,7 @@
 // Every commission the connected address is a party to, newest first: as client and as maker, each
 // with its small clock and its state in one line. Nothing here signs anything.
 
+import { CreditPanel } from "@/components/appeal";
 import { Section } from "@/components/bits";
 import { BrassLink } from "@/components/button";
 import { CommissionRow } from "@/components/commission-row";
@@ -68,6 +69,9 @@ export default function MinePage() {
             )}
           </section>
           {list.data.partial && <p className="text-sm text-ink-3">The newest {rows.length} of {list.data.total} are shown.</p>}
+          <div className="max-w-[640px]">
+            <CreditPanel address={me.address} />
+          </div>
         </>
       )}
     </div>
