@@ -625,6 +625,63 @@ GenLayer Studio, chain 61999, RPC `https://studio.genlayer.com/api`, explorer
 `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6` in its first
 line.
 
+## Evidence: contract version 2 (milestone v1)
+
+Run on 14 Nov 2026 on GenLayer Studio (chain 61999) by `tests/on_chain/smoke.mjs`, from generated accounts funded from the
+Studio faucet, none of them anybody's wallet: MAKER, CLIENT and STRANGER are fresh accounts funded for this run. **55 passed, 1 failed**; transactions: 44 in 43 steps; sent a second time: appealKeep.
+The whole log is `tests/on_chain/smoke-run.log`. A three-stage commission walks Outline, First draft and Final with one release per stage, and two bonded appeals (one on a press, one on a delivery) are upheld, the bond going to the other side.
+
+- `commission_clock.py` deployed at [`0x7f0b6085DBd9ec096831D885E636f52cEf193e6F`](https://explorer-studio.genlayer.com/address/0x7f0b6085DBd9ec096831D885E636f52cEf193e6F)
+
+- the code deployed at 0x7f0b6085DBd9ec096831D885E636f52cEf193e6F is byte for byte contracts/commission_clock.py: 129768 bytes, sha256 762f84705f608e59e5243ea4486c673c7a0195f2c7c023ee9cae30ca245d88d9
+
+| step | by | transactions | votes |
+|---|---|---|---|
+| MAKER opens S1, Fernhill Pottery: 1 GEN, 900 s for the maker, 420 s for the client, 10% per started minute late up to 50% | MAKER | [0x7222795e…](https://explorer-studio.genlayer.com/tx/0x7222795e612d959323040dbc235c9207ad96bad781177b2e2292ce7a9d14c6b0), [0x5852a55a…](https://explorer-studio.genlayer.com/tx/0x5852a55ad440554f6cd7715630fc96cafa42dbcc080f9fa0360fc8fe4fd019db) | 3 agree, 0 disagree, 2 idle |
+| STRANGER may not close S1 | STRANGER | [0xe30aa487…](https://explorer-studio.genlayer.com/tx/0xe30aa487da018be90e9f9377ad78737e1c32c248624a98fc9d64a8bff79c31d5) | 4 agree, 0 disagree, 1 idle |
+| CLIENT commissions S1 with the mug brief: C1, 1 GEN held, no clock yet | CLIENT | [0x7c254f92…](https://explorer-studio.genlayer.com/tx/0x7c254f9295a8111fb3002fcee92760a514e2e90f6f8614f53b671f69ebf03943) | 4 agree, 0 disagree, 1 idle |
+| CLIENT commissions S1 with the mug brief: C2, 1 GEN held, no clock yet | CLIENT | [0xcf73f07e…](https://explorer-studio.genlayer.com/tx/0xcf73f07e621440a2b6b8ca8c98dbbcf8ceb03424fd445f22ae87c3ff71aeac2b) | 4 agree, 0 disagree, 1 idle |
+| CLIENT commissions S1 with the mug brief: C3, 1 GEN held, no clock yet | CLIENT | [0x165b273e…](https://explorer-studio.genlayer.com/tx/0x165b273ee64e476429d7ef43cf4c2eac464de6090891a595395a15f8f0d049ce) | 3 agree, 0 disagree, 2 idle |
+| MAKER may not commission its own studio, and the 1 GEN comes back in the same transaction | MAKER | [0xda8001ad…](https://explorer-studio.genlayer.com/tx/0xda8001adfb5208c09592c2bf0863e45b0edd277edcdb6b1d048b9df59d86b6d0) | 3 agree, 0 disagree, 2 idle |
+| STRANGER may not accept C1 | STRANGER | [0x724465a9…](https://explorer-studio.genlayer.com/tx/0x724465a91a30f4e670c6bbe8102e997755a180ed52b26e2cd03aae04ae717461) | 3 agree, 0 disagree, 2 idle |
+| MAKER accepts C3: the clock starts with the move on the maker | MAKER | [0x2e7c18c0…](https://explorer-studio.genlayer.com/tx/0x2e7c18c0937446d840c5b653ecbfcb44bfd75563260815ebc3a458834c496f73) | 3 agree, 0 disagree, 2 idle |
+| CLIENT may not cancel C3 yet: the maker's cut is far from its cap | CLIENT | [0xbdd8ae3f…](https://explorer-studio.genlayer.com/tx/0xbdd8ae3f69165f456f32e4a1b2dbb0ad32954bb805c4b8c9909c13394b68ae87) | 5 agree, 0 disagree, 0 idle |
+| MAKER accepts C2 | MAKER | [0x97123486…](https://explorer-studio.genlayer.com/tx/0x971234867201b5e6ab4de32494d097fd3fde026ff125aa55cbd731f416247b7c) | 5 agree, 0 disagree, 0 idle |
+| every validator fetches mug-final.html for C2 and agrees it is the finished piece: delivered, the move to CLIENT | MAKER | [0x190469d4…](https://explorer-studio.genlayer.com/tx/0x190469d4e193b2ba561cef50640415f74db482173f1a3a1b16ca878185d8a886) | 3 agree, 0 disagree, 2 idle |
+| MAKER may not claim silence on C2 yet: the client has not used its 420 seconds | MAKER | [0x7f145128…](https://explorer-studio.genlayer.com/tx/0x7f145128835e8e649c66624eae395f28624e6c8c38218aa4b5ee323f79ee9226) | 5 agree, 0 disagree, 0 idle |
+| MAKER accepts C1 | MAKER | [0x74a98b23…](https://explorer-studio.genlayer.com/tx/0x74a98b23a8cfb8df1b098bb5188d67cb39549be3f8aee0e3344f76084a17d53f) | 4 agree, 0 disagree, 1 idle |
+| CLIENT writes while MAKER holds the move: noted, nobody asked, the clock unchanged | CLIENT | [0xc311ef84…](https://explorer-studio.genlayer.com/tx/0xc311ef84777dfebd112bbb5f37a3676e5399ca891edb75c79a6dc50fd14978b2) | 3 agree, 0 disagree, 2 idle |
+| MAKER asks which glaze to name, which the brief leaves open: pass, the move goes to CLIENT | MAKER | [0x0975d8a0…](https://explorer-studio.genlayer.com/tx/0x0975d8a0c766d1930b603e1e499ea10b367acacc7333f5693a5797e72d7a7109) | 3 agree, 1 disagree, 1 idle |
+| CLIENT: "I'll get back to you on that.": keep, the move stays with CLIENT | CLIENT | [0x4079f04b…](https://explorer-studio.genlayer.com/tx/0x4079f04b38bf1468eb2d692a9f16de07ef69eb65cf788fccfe5bc7a4c7305459) | 3 agree, 0 disagree, 2 idle |
+| CLIENT: "Sea-green, please.": pass, the move goes back to MAKER | CLIENT | [0x7812c789…](https://explorer-studio.genlayer.com/tx/0x7812c7894a78039e8ae8f74658bbd9839a7f53dfa81cb6de2105cd57f561e5fb) | 3 agree, 0 disagree, 2 idle |
+| MAKER asks whether to write in English, which the brief already says: keep | MAKER | [0xea7e372b…](https://explorer-studio.genlayer.com/tx/0xea7e372b648e94caac25be20747db24086a1833b4d1d54254a19e5a482eb5755) | 3 agree, 2 disagree, 0 idle |
+| MAKER: "Working on it, nearly there.": keep, a progress update hands nothing over | MAKER | [0xed78c4b2…](https://explorer-studio.genlayer.com/tx/0xed78c4b22e0c0943abb9fc7a0d595fa084e608fe321e2c58582bba7d9132d97a) | 3 agree, 0 disagree, 2 idle |
+| MAKER delivers mug-placeholder.html ("Draft coming soon."): missing, the move stays with MAKER | MAKER | [0x4f1ac266…](https://explorer-studio.genlayer.com/tx/0x4f1ac266806fa27e4eef585d88c70d66496c6b9fde9da4de9a3ce28db480dba5) | 3 agree, 0 disagree, 2 idle |
+| MAKER delivers mug-final.html: delivered, the move goes to CLIENT for its review | MAKER | [0x7c7abd2e…](https://explorer-studio.genlayer.com/tx/0x7c7abd2e0cb6fe12dcde8fb71bee212a9e4cd841f1ad040b1c7e19ef6fb80ead) | 3 agree, 0 disagree, 2 idle |
+| CLIENT accepts the work: the split follows the maker's stored 75 seconds exactly | CLIENT | [0xe78b130f…](https://explorer-studio.genlayer.com/tx/0xe78b130fc9c863b398916708613b58a34ded1a7b3e20822a440ba2ac4ebc5942) | 4 agree, 0 disagree, 1 idle |
+| CLIENT sat on C2 past its 420 seconds: MAKER claims silence and it settles as accepted | MAKER | [0x02225e06…](https://explorer-studio.genlayer.com/tx/0x02225e06ac83fc1c786ad61bbf93f7429b1964c8e58b7d444ff3dc72f1bcad87) | 3 agree, 0 disagree, 2 idle |
+| MAKER sat on C3 until its cut reached the cap: CLIENT cancels and the whole 1 GEN comes back | CLIENT | [0x1f42eebc…](https://explorer-studio.genlayer.com/tx/0x1f42eebc3db5d397d4e4e99bbc6284e0b44b08f8db802a0c60be7f382a3ca796) | 4 agree, 0 disagree, 1 idle |
+| a second cancel of C3 is refused | CLIENT | [0x0148e8f5…](https://explorer-studio.genlayer.com/tx/0x0148e8f54e2b469f26d0b4a7120dee3b0de43ff7d5d8cf5a6d8ec8949e586f92) | 4 agree, 0 disagree, 1 idle |
+| MAKER opens S2 in three stages: Outline 20%, First draft 30%, Final 50% of 1 GEN | MAKER | [0x111c20c9…](https://explorer-studio.genlayer.com/tx/0x111c20c9cf87d4a36aa41b4f3025cc2019e380f276b81a56c6fdf709418d3ef3) | 4 agree, 0 disagree, 1 idle |
+| CLIENT commissions S2: C4, 1 GEN held | CLIENT | [0x80d18bef…](https://explorer-studio.genlayer.com/tx/0x80d18befc3dc628a2e90882f4d0172617150839e165067cb0e30b7c570819293) | 4 agree, 0 disagree, 1 idle |
+| MAKER accepts C4: stage 1 of 3, the move on the maker | MAKER | [0xbec01db1…](https://explorer-studio.genlayer.com/tx/0xbec01db1b9f983d2298a14a178a8d6b729a4177220968e9eaf39006c4af4628b) | 3 agree, 0 disagree, 2 idle |
+| MAKER deposits two appeal bonds as credit; no model is asked | MAKER | [0xe1ba1b1c…](https://explorer-studio.genlayer.com/tx/0xe1ba1b1c896179a83737718d259e0806b841dec93c14557f3500cab49f270e6f) | 4 agree, 0 disagree, 1 idle |
+| MAKER delivers mug-placeholder.html for the Outline stage: missing, the move stays with MAKER | MAKER | [0x2711d5bb…](https://explorer-studio.genlayer.com/tx/0x2711d5bb86ae525f27ad3d456e1e79e90373bd31613c452e72904e1e54a59c15) | 3 agree, 1 disagree, 1 idle |
+| MAKER appeals with its reason: the validators read the same page again and come to missing again; the bond goes to CLIENT's credit | MAKER | [0x61d1da8b…](https://explorer-studio.genlayer.com/tx/0x61d1da8b7532533670bca070a7245a75a479e508040e204eb66fbd2fe97c1fea) | 3 agree, 0 disagree, 2 idle |
+| a second appeal of the same verdict is refused: an appeal is final | MAKER | [0x867d10d8…](https://explorer-studio.genlayer.com/tx/0x867d10d8f59f64c7d2f93c10b5536c63c443e2470b18b5ceed45828e4fda97a1) | 3 agree, 0 disagree, 2 idle |
+| MAKER delivers mug-outline.html: delivered for stage 1, the move to CLIENT | MAKER | [0xb8180bad…](https://explorer-studio.genlayer.com/tx/0xb8180badb1c7174f379a809b77379bb4c78d6750c56a0de4057bf4779f7c58ca) | 3 agree, 0 disagree, 2 idle |
+| CLIENT accepts stage 1: its 0.2 GEN is paid at once, less the cut the maker's 226 stored seconds come to | CLIENT | [0xf72b58ac…](https://explorer-studio.genlayer.com/tx/0xf72b58ac84bdbf89e01af4733309a78d055ecd4211cc5458606c443127a97aa1) | 3 agree, 0 disagree, 2 idle |
+| MAKER asks whether to write in English, which the brief already says: keep | MAKER | [0xf15a641e…](https://explorer-studio.genlayer.com/tx/0xf15a641ea035e68cbc647db8d953aaef51a6ad49954d83beb279658a7b83f46a) | 3 agree, 1 disagree, 1 idle |
+| MAKER appeals the keep: the four askings again with its reason and CLIENT's last message, keep again; the second bond goes to CLIENT | MAKER | [0x4ca19f10…](https://explorer-studio.genlayer.com/tx/0x4ca19f10b75472da026da516cf697f3754906c18f79a16ae08a264fb537f037f), [0x68817637…](https://explorer-studio.genlayer.com/tx/0x68817637c207cdba98035b59c91612d5015dcf213d5da741d36f1a400f1d3bde) | 3 agree, 0 disagree, 2 idle |
+| MAKER delivers mug-first-draft.html: delivered for stage 2 | MAKER | [0x13fa1331…](https://explorer-studio.genlayer.com/tx/0x13fa13315a0cc23139ab7315c777a288229a2a7baaf280ea9e3872ecbb53e6c7) | 3 agree, 1 disagree, 1 idle |
+| CLIENT accepts stage 2: its 0.3 GEN, cut on its own share only | CLIENT | [0xeb2c59dd…](https://explorer-studio.genlayer.com/tx/0xeb2c59dd388ff6890f0313dd8e61b41ec480a482a8ebee368d49d6f4bda78571) | 3 agree, 0 disagree, 2 idle |
+| MAKER delivers mug-final.html: delivered for stage 3 | MAKER | [0x224604bb…](https://explorer-studio.genlayer.com/tx/0x224604bbb1a82bc71ef61d81c554ec1b8d45b83e81a6b73d7d984e7a4f19cf01) | 3 agree, 0 disagree, 2 idle |
+| CLIENT accepts the last stage: C4 settles as accepted, and the three stages add up to the fee | CLIENT | [0x90d0a61a…](https://explorer-studio.genlayer.com/tx/0x90d0a61a4a92742b6391c3880be1330a18e7d9f5f4b44825f7199dd25839ced9) | 3 agree, 0 disagree, 2 idle |
+| CLIENT withdraws the 2 bonds the lost appeals moved to its credit | CLIENT | [0x2442cb50…](https://explorer-studio.genlayer.com/tx/0x2442cb500bb483d0d7f135a1de67a8367b05653b8d403d34a04344f0f897b183) | 3 agree, 0 disagree, 2 idle |
+| MAKER, its credit spent on two lost appeals, is refused a withdrawal | MAKER | [0xa52868a9…](https://explorer-studio.genlayer.com/tx/0xa52868a9f6a4f56fcbf86a139246266217e1f99a14f4d6d6db5e2ccc722a8c85) | 3 agree, 0 disagree, 2 idle |
+
+**The one failed check, stated plainly.** `commissions_of(CLIENT)` returned 4 where the script expected 3: the script's count was left over from v1 and did not include the new staged commission, which this run itself opened. The contract's answer is the correct one; the check is corrected in `tests/on_chain/smoke.mjs` and the run was not repeated. The `withdrawMaker` ERROR line is the refused withdrawal of credit the maker no longer has, which the script expects.
+
 ## Evidence
 
 This record is of the one-stage contract (version 1), before the milestone above; version 2 has not been deployed.

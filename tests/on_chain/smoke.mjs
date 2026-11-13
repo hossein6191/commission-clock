@@ -527,7 +527,7 @@ console.log(`\n[${stamp()}] ---- phase D: the code read back, the views, the bal
   const rec2 = (await seen("studioStaged", "studio", [s2])).record || {};
   ok(`studio(${s2}) records the stages released and the appeals`, rec2.stages_released === 2 && rec2.appeals === ran && rec2.overturned === 0 && rec2.delivered === 3 && rec2.missing === 1, JSON.stringify(rec2));
   const mine = await seen("commissionsOfClient", "commissions_of", [st.accounts.client, 0, 20]);
-  ok("commissions_of(CLIENT) lists the three commissions as client, and finds the address in any letter case", mine.total === 3 && (mine.rows || []).every((r) => r.role === "client"), JSON.stringify({ total: mine.total }));
+  ok("commissions_of(CLIENT) lists the four commissions as client (three single-stage, one staged), and finds the address in any letter case", mine.total === 4 && (mine.rows || []).every((r) => r.role === "client"), JSON.stringify({ total: mine.total }));
   const stats = await seen("stats", "stats", []);
   ok("stats(): nothing held, no credit left, one noted message, one refused payment returned", stats.held === "0" && stats.credit === "0" && stats.accepted === 2 && stats.accepted_by_silence === 1 && stats.cancelled_late === 1 && stats.noted === 1 && stats.refused_payments === 1 && stats.returned === String(FEE) && stats.appeals === ran && stats.upheld === ran && stats.stages_released === 2, JSON.stringify(stats));
   const rules = await seen("rules", "rules", []);
